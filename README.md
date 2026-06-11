@@ -76,3 +76,32 @@ bot.db
 .venv
 __pycache__
 ```
+
+
+## منوی شناور / برای ادمین
+
+در این نسخه وقتی ادمین داخل ربات `/` بزند، دستورهای مدیریتی را به صورت شناور می‌بیند:
+
+```text
+/add
+/files
+/stats
+/channels
+/addchannel
+/setchannel
+/delchannel
+/debug_channel
+```
+
+نکته: خود تلگرام فقط نام دستور را در منوی شناور نشان می‌دهد، نه آرگومان کامل.  
+برای مثال بعد از انتخاب `/addchannel` باید ادامه‌اش را خودت بنویسی:
+
+```text
+/addchannel @irfreenet
+```
+
+یا برای کانال خصوصی:
+
+```text
+/addchannel -1001234567890 https://t.me/+InviteLink
+```

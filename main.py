@@ -12,6 +12,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -73,7 +75,7 @@ ADMIN_HELP_TEXT = """
 /channels — مدیریت کانال‌های اجباری
 /addchannel @username — افزودن کانال اجباری
 /setchannel @username — جایگزینی کانال اجباری
-/delchannel<ID> — حذف کانال اجباری، مثال: /delchannel3
+/delchannel ID — حذف کانال اجباری، مثال: /delchannel 3
 """.strip()
 
 # ============================================================
@@ -600,7 +602,7 @@ async def channels_handler(message: Message) -> None:
         "اگر کانال خصوصی است:\n"
         "<code>/addchannel -1001234567890 https://t.me/+InviteLink</code>\n\n"
         "حذف کانال:\n"
-        "<code>/delchannelID</code>"
+        "<code>/delchannel 1</code>"
     )
     await message.answer("\n".join(lines))
 
@@ -695,11 +697,25 @@ async def set_channel_handler(message: Message) -> None:
 
 
 @router.message(F.text.regexp(r"^/delchannel\d+$"))
+@router.message(Command("delchannel"))
 async def delete_channel_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
         return
 
-    channel_id = int(message.text.replace("/delchannel", ""))
+    text = message.text or ""
+    if text.startswith("/delchannel") and text.replace("/delchannel", "").isdigit():
+        channel_id = int(text.replace("/delchannel", ""))
+    else:
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip().isdigit():
+            await message.answer(
+                "فرمت درست:\n"
+                "<code>/delchannel 1</code>\n\n"
+                "ID کانال را از بخش /channels بردار."
+            )
+            return
+        channel_id = int(parts[1].strip())
+
     ok = await crud.disable_required_channel(channel_id)
     if ok:
         await message.answer(f"✅ کانال اجباری {channel_id} غیرفعال شد.")
@@ -762,15 +778,40 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
 
+    # منوی شناور دستورها وقتی کاربر "/" می‌زند.
+    # کاربران عادی فقط دستورهای ساده را می‌بینند.
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="شروع ربات"),
             BotCommand(command="help", description="راهنما"),
-            BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
-        ]
+        ],
+        scope=BotCommandScopeDefault(),
     )
 
-    print("Bot started — dynamic-required-channels")
+    # ادمین‌ها دستورهای مدیریتی را در منوی شناور "/" می‌بینند.
+    admin_commands = [
+        BotCommand(command="start", description="شروع ربات / پنل ادمین"),
+        BotCommand(command="help", description="راهنمای ادمین"),
+        BotCommand(command="add", description="ثبت فایل جدید"),
+        BotCommand(command="files", description="لیست فایل‌ها"),
+        BotCommand(command="stats", description="آمار ربات"),
+        BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
+        BotCommand(command="addchannel", description="افزودن کانال: /addchannel @username"),
+        BotCommand(command="setchannel", description="جایگزینی کانال: /setchannel @username"),
+        BotCommand(command="delchannel", description="حذف کانال: /delchannel ID"),
+        BotCommand(command="debug_channel", description="تست دسترسی ربات به کانال‌ها"),
+    ]
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.set_my_commands(
+                admin_commands,
+                scope=BotCommandScopeChat(chat_id=admin_id),
+            )
+        except Exception:
+            pass
+
+    print("Bot started — admin-floating-command-menu")
     await dp.start_polling(bot)
 
 
