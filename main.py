@@ -44,6 +44,7 @@ BTN_ADD_FILE = "➕ ثبت فایل"
 BTN_FILES = "📋 لیست فایل‌ها"
 BTN_STATS = "📊 آمار"
 BTN_HELP = "📌 راهنما"
+BTN_CHANNELS = "📢 کانال‌های اجباری"
 
 JOIN_REQUIRED_TEXT = "🔒 برای دریافت فایل، ابتدا عضو کانال شوید.\n\nبعد از عضویت، به همین ربات برگردید و روی «✅ بررسی عضویت» بزنید 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
@@ -69,6 +70,10 @@ ADMIN_HELP_TEXT = """
 /del<ID> — غیرفعال کردن فایل، مثال: /del12
 /stats — آمار
 /debug_channel — تست تنظیمات کانال عضویت
+/channels — مدیریت کانال‌های اجباری
+/addchannel @username — افزودن کانال اجباری
+/setchannel @username — جایگزینی کانال اجباری
+/delchannel<ID> — حذف کانال اجباری، مثال: /delchannel3
 """.strip()
 
 # ============================================================
@@ -89,16 +94,47 @@ def admin_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
-            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_CHANNELS)],
+            [KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
     )
 
 
-def join_keyboard(payload: str) -> InlineKeyboardMarkup:
+async def get_join_channels() -> list[dict[str, str]]:
+    """Active required channels from DB; fallback to .env if DB has no active channels."""
+    db_channels = await crud.get_required_channels(active_only=True)
+    if db_channels:
+        return [
+            {
+                "chat_id": str(ch.chat_id),
+                "title": ch.title or str(ch.chat_id),
+                "link": ch.link or "",
+            }
+            for ch in db_channels
+        ]
+
+    if REQUIRED_CHANNEL:
+        return [
+            {
+                "chat_id": REQUIRED_CHANNEL,
+                "title": REQUIRED_CHANNEL,
+                "link": REQUIRED_CHANNEL_LINK or "",
+            }
+        ]
+
+    return []
+
+
+async def join_keyboard(payload: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if REQUIRED_CHANNEL_LINK:
-        rows.append([InlineKeyboardButton(text=BTN_JOIN_CHANNEL, url=REQUIRED_CHANNEL_LINK)])
+    channels = await get_join_channels()
+
+    for ch in channels:
+        if ch.get("link"):
+            title = ch.get("title") or "کانال"
+            rows.append([InlineKeyboardButton(text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
+
     rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"check:{payload}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -115,13 +151,20 @@ def extract_file_id_from_payload(payload: str | None) -> int | None:
 async def is_member(bot: Bot, user_id: int) -> bool:
     if is_admin(user_id) and SKIP_MEMBERSHIP_FOR_ADMINS:
         return True
-    if not REQUIRED_CHANNEL:
+
+    channels = await get_join_channels()
+    if not channels:
         return True
-    try:
-        member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        return member.status in {"creator", "administrator", "member"}
-    except Exception:
-        return False
+
+    for ch in channels:
+        try:
+            member = await bot.get_chat_member(ch["chat_id"], user_id)
+            if member.status not in {"creator", "administrator", "member"}:
+                return False
+        except Exception:
+            return False
+
+    return True
 
 
 async def notify_admins(bot: Bot, text: str) -> None:
@@ -293,7 +336,7 @@ async def handle_file_request(message: Message, payload: str) -> None:
             )
             return
 
-        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=join_keyboard(payload))
+        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard(payload))
         return
 
     await send_file_to_user(message.bot, message.chat.id, file_id)
@@ -330,7 +373,7 @@ async def check_join_callback(call: CallbackQuery) -> None:
         await call.answer("هنوز عضویت شما تایید نشده است.", show_alert=True)
         # دکمه‌ها را نگه می‌داریم تا کاربر بعد از عضویت دوباره بررسی کند.
         try:
-            await call.message.edit_text(JOIN_REQUIRED_TEXT, reply_markup=join_keyboard(payload))
+            await call.message.edit_text(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard(payload))
         except Exception:
             pass
         return
@@ -519,33 +562,180 @@ async def delete_file_handler(message: Message) -> None:
         await message.answer("❌ فایل پیدا نشد.")
 
 
+@router.message(F.text == BTN_CHANNELS)
+@router.message(Command("channels"))
+async def channels_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    db_channels = await crud.get_required_channels(active_only=False)
+    lines = ["📢 <b>مدیریت کانال‌های اجباری</b>\n"]
+
+    if db_channels:
+        for ch in db_channels:
+            status = "✅ فعال" if ch.is_active else "❌ غیرفعال"
+            lines.append(
+                f"{status}\n"
+                f"ID: <code>{ch.id}</code>\n"
+                f"عنوان: <b>{ch.title or '-'}</b>\n"
+                f"Chat: <code>{ch.chat_id}</code>\n"
+                f"Link: <code>{ch.link or '-'}</code>\n"
+                f"حذف: /delchannel{ch.id}\n"
+            )
+    else:
+        lines.append("هنوز کانالی از داخل ربات ثبت نشده است.")
+        if REQUIRED_CHANNEL:
+            lines.append(
+                "\nفعلاً ربات از تنظیمات Railway/.env استفاده می‌کند:\n"
+                f"REQUIRED_CHANNEL: <code>{REQUIRED_CHANNEL}</code>\n"
+                f"REQUIRED_CHANNEL_LINK: <code>{REQUIRED_CHANNEL_LINK or 'خالی'}</code>"
+            )
+
+    lines.append(
+        "\n<b>دستورها:</b>\n"
+        "افزودن کانال عمومی:\n"
+        "<code>/addchannel @irfreenet</code>\n\n"
+        "جایگزینی همه کانال‌ها با یک کانال:\n"
+        "<code>/setchannel @irfreenet</code>\n\n"
+        "اگر کانال خصوصی است:\n"
+        "<code>/addchannel -1001234567890 https://t.me/+InviteLink</code>\n\n"
+        "حذف کانال:\n"
+        "<code>/delchannelID</code>"
+    )
+    await message.answer("\n".join(lines))
+
+
+async def _validate_and_save_channel(bot: Bot, chat_id: str, link: str | None, replace_all: bool = False):
+    chat = await bot.get_chat(chat_id)
+    title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+
+    if not link and getattr(chat, "username", None):
+        link = f"https://t.me/{chat.username}"
+
+    if replace_all:
+        await crud.clear_required_channels()
+
+    return await crud.add_required_channel(
+        chat_id=str(chat_id),
+        link=link,
+        title=title,
+    )
+
+
+@router.message(Command("addchannel"))
+async def add_channel_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) < 2:
+        await message.answer(
+            "فرمت درست:\n"
+            "<code>/addchannel @irfreenet</code>\n\n"
+            "برای کانال خصوصی:\n"
+            "<code>/addchannel -1001234567890 https://t.me/+InviteLink</code>"
+        )
+        return
+
+    chat_id = parts[1].strip()
+    link = parts[2].strip() if len(parts) >= 3 else None
+
+    try:
+        item = await _validate_and_save_channel(message.bot, chat_id=chat_id, link=link, replace_all=False)
+    except Exception as e:
+        await message.answer(
+            "❌ کانال اضافه نشد.\n\n"
+            "ربات باید داخل آن کانال ادمین باشد و مقدار کانال درست باشد.\n"
+            f"Error: <code>{type(e).__name__}: {e}</code>"
+        )
+        return
+
+    await message.answer(
+        "✅ کانال اجباری اضافه شد.\n\n"
+        f"ID: <code>{item.id}</code>\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"Chat: <code>{item.chat_id}</code>\n"
+        f"Link: <code>{item.link or '-'}</code>"
+    )
+
+
+@router.message(Command("setchannel"))
+async def set_channel_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) < 2:
+        await message.answer(
+            "فرمت درست:\n"
+            "<code>/setchannel @irfreenet</code>\n\n"
+            "این دستور همه کانال‌های قبلی را غیرفعال می‌کند و فقط همین کانال را فعال می‌گذارد."
+        )
+        return
+
+    chat_id = parts[1].strip()
+    link = parts[2].strip() if len(parts) >= 3 else None
+
+    try:
+        item = await _validate_and_save_channel(message.bot, chat_id=chat_id, link=link, replace_all=True)
+    except Exception as e:
+        await message.answer(
+            "❌ کانال جایگزین نشد.\n\n"
+            "ربات باید داخل آن کانال ادمین باشد و مقدار کانال درست باشد.\n"
+            f"Error: <code>{type(e).__name__}: {e}</code>"
+        )
+        return
+
+    await message.answer(
+        "✅ کانال اجباری جایگزین شد.\n\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"Chat: <code>{item.chat_id}</code>\n"
+        f"Link: <code>{item.link or '-'}</code>"
+    )
+
+
+@router.message(F.text.regexp(r"^/delchannel\d+$"))
+async def delete_channel_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    channel_id = int(message.text.replace("/delchannel", ""))
+    ok = await crud.disable_required_channel(channel_id)
+    if ok:
+        await message.answer(f"✅ کانال اجباری {channel_id} غیرفعال شد.")
+    else:
+        await message.answer("❌ کانال پیدا نشد.")
+
+
 @router.message(Command("debug_channel"))
 async def debug_channel_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
         return
 
-    lines = [
-        "🧪 <b>تست کانال عضویت</b>",
-        f"REQUIRED_CHANNEL: <code>{REQUIRED_CHANNEL or 'خالی'}</code>",
-        f"REQUIRED_CHANNEL_LINK: <code>{REQUIRED_CHANNEL_LINK or 'خالی'}</code>",
-    ]
+    lines = ["🧪 <b>تست کانال‌های عضویت</b>"]
 
-    if not REQUIRED_CHANNEL:
-        lines.append("\n❌ REQUIRED_CHANNEL خالی است.")
-        await message.answer("\n".join(lines))
+    channels = await get_join_channels()
+    if not channels:
+        await message.answer("❌ هیچ کانال اجباری فعالی تنظیم نشده است.")
         return
 
-    try:
-        chat = await message.bot.get_chat(REQUIRED_CHANNEL)
-        lines.append(f"\n✅ ربات کانال را می‌بیند.")
-        lines.append(f"Chat ID: <code>{chat.id}</code>")
-        if getattr(chat, "username", None):
-            lines.append(f"Username: @{chat.username}")
-    except Exception as e:
-        lines.append("\n❌ ربات نمی‌تواند کانال را ببیند.")
-        lines.append("راه‌حل: ربات را داخل کانال اصلی ادمین کن.")
-        lines.append("اگر کانال خصوصی است، REQUIRED_CHANNEL باید آیدی عددی -100... باشد.")
-        lines.append(f"Error: <code>{type(e).__name__}: {e}</code>")
+    for ch in channels:
+        lines.append(
+            "\n--------------------\n"
+            f"Title: <b>{ch.get('title') or '-'}</b>\n"
+            f"Chat: <code>{ch.get('chat_id')}</code>\n"
+            f"Link: <code>{ch.get('link') or 'خالی'}</code>"
+        )
+        try:
+            chat = await message.bot.get_chat(ch["chat_id"])
+            lines.append("✅ ربات کانال را می‌بیند.")
+            lines.append(f"Chat ID: <code>{chat.id}</code>")
+            if getattr(chat, "username", None):
+                lines.append(f"Username: @{chat.username}")
+        except Exception as e:
+            lines.append("❌ ربات نمی‌تواند کانال را ببیند.")
+            lines.append("راه‌حل: ربات را داخل کانال ادمین کن.")
+            lines.append(f"Error: <code>{type(e).__name__}: {e}</code>")
 
     await message.answer("\n".join(lines))
 
@@ -576,10 +766,11 @@ async def main() -> None:
         [
             BotCommand(command="start", description="شروع ربات"),
             BotCommand(command="help", description="راهنما"),
+            BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
         ]
     )
 
-    print("Bot started — fixed-no-expired-message")
+    print("Bot started — dynamic-required-channels")
     await dp.start_polling(bot)
 
 

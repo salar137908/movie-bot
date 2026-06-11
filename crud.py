@@ -1,6 +1,6 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
-from database import FileItem, SessionLocal, User
+from database import FileItem, RequiredChannel, SessionLocal, User
 
 
 async def save_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
@@ -47,9 +47,7 @@ async def get_file(file_id: int) -> FileItem | None:
 
 async def get_files(limit: int = 20) -> list[FileItem]:
     async with SessionLocal() as session:
-        result = await session.execute(
-            select(FileItem).order_by(FileItem.id.desc()).limit(limit)
-        )
+        result = await session.execute(select(FileItem).order_by(FileItem.id.desc()).limit(limit))
         return list(result.scalars().all())
 
 
@@ -82,4 +80,52 @@ async def count_users() -> int:
 async def count_files() -> int:
     async with SessionLocal() as session:
         result = await session.execute(select(func.count(FileItem.id)))
+        return int(result.scalar() or 0)
+
+
+async def add_required_channel(chat_id: str, link: str | None = None, title: str | None = None) -> RequiredChannel:
+    async with SessionLocal() as session:
+        result = await session.execute(select(RequiredChannel).where(RequiredChannel.chat_id == str(chat_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            item = RequiredChannel(chat_id=str(chat_id), link=link, title=title, is_active=True)
+            session.add(item)
+        else:
+            item.link = link
+            item.title = title
+            item.is_active = True
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def get_required_channels(active_only: bool = False) -> list[RequiredChannel]:
+    async with SessionLocal() as session:
+        stmt = select(RequiredChannel).order_by(RequiredChannel.id.desc())
+        if active_only:
+            stmt = select(RequiredChannel).where(RequiredChannel.is_active.is_(True)).order_by(RequiredChannel.id.desc())
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def disable_required_channel(channel_id: int) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(select(RequiredChannel).where(RequiredChannel.id == int(channel_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        item.is_active = False
+        await session.commit()
+        return True
+
+
+async def clear_required_channels() -> None:
+    async with SessionLocal() as session:
+        await session.execute(update(RequiredChannel).values(is_active=False))
+        await session.commit()
+
+
+async def count_required_channels() -> int:
+    async with SessionLocal() as session:
+        result = await session.execute(select(func.count(RequiredChannel.id)).where(RequiredChannel.is_active.is_(True)))
         return int(result.scalar() or 0)

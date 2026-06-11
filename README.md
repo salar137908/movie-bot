@@ -1,49 +1,72 @@
-# Movie Locker Bot — Latest Files
+# Movie Locker Bot — Bot Only Channel Management
 
-آخرین نسخه تمیز پروژه Movie Locker Bot.
+در این نسخه دیگر لازم نیست کانال‌های اجباری را داخل Railway Variables وارد کنی.
+ادمین همه کانال‌های اجباری را از داخل خود ربات مدیریت می‌کند.
 
-## قابلیت‌ها
+## Railway Variables لازم
 
-- ثبت فایل توسط ادمین
-- دریافت فایل با لینک `?start=f_ID`
-- عضویت اجباری در کانال اصلی
-- ارسال فایل بعد از تایید عضویت
-- حذف خودکار فایل بعد از زمان مشخص
-- حذف پیام هشدار بعد از حذف فایل
-- بدون ارسال پیام «زمان مشاهده فایل تمام شد»
-
-## فایل‌ها
-
-- `main.py`
-- `config.py`
-- `database.py`
-- `crud.py`
-- `requirements.txt`
-- `railway.json`
-- `.python-version`
-- `.gitignore`
-- `.env.example`
-- `README.md`
-
-## اجرای لوکال
-
-```cmd
-.venv\Scripts\activate.bat
-python -m py_compile main.py
-python main.py
-```
-
-## Railway Variables
+فقط این‌ها لازم است:
 
 ```env
 BOT_TOKEN=توکن ربات
 ADMIN_IDS=آیدی عددی ادمین
 DATABASE_URL=sqlite+aiosqlite:////app/data/bot.db
-REQUIRED_CHANNEL=@irfreenet
-REQUIRED_CHANNEL_LINK=https://t.me/irfreenet
 DELETE_AFTER_SECONDS=15
 SKIP_MEMBERSHIP_FOR_ADMINS=1
 ```
+
+دیگر لازم نیست این‌ها را در Railway بزنی:
+
+```env
+REQUIRED_CHANNEL
+REQUIRED_CHANNEL_LINK
+```
+
+## مدیریت کانال‌ها داخل ربات
+
+نمایش پنل کانال‌ها:
+
+```text
+/channels
+```
+
+افزودن کانال عمومی:
+
+```text
+/addchannel @irfreenet
+```
+
+جایگزینی همه کانال‌های قبلی با یک کانال:
+
+```text
+/setchannel @irfreenet
+```
+
+حذف کانال:
+
+```text
+/delchannel1
+```
+
+برای کانال خصوصی:
+
+```text
+/addchannel -1001234567890 https://t.me/+InviteLink
+```
+
+## دکمه شیشه‌ای عضویت
+
+برای کانال عمومی، وقتی با `/addchannel @username` اضافه شود، ربات خودش لینک شیشه‌ای را می‌سازد:
+
+```text
+https://t.me/username
+```
+
+برای کانال خصوصی، چون یوزرنیم عمومی ندارد، باید لینک دعوت را بدهی.
+
+## نکته مهم
+
+ربات باید داخل هر کانال اجباری Admin باشد تا بتواند عضویت کاربران را بررسی کند.
 
 ## آپلود نکن
 

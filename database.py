@@ -27,17 +27,22 @@ class FileItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
-
-    # محل پیام اصلی در کانال آرشیو
     archive_chat_id: Mapped[str] = mapped_column(String(100))
     archive_message_id: Mapped[int] = mapped_column(Integer)
-
-    # روش مطمئن‌تر برای ارسال و حذف:
-    # هنگام ثبت فایل، file_id خود تلگرام هم ذخیره می‌شود.
     telegram_file_id: Mapped[str | None] = mapped_column(String(600), nullable=True)
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
     views: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RequiredChannel(Base):
+    __tablename__ = "required_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -50,14 +55,11 @@ async def _add_column_if_missing(conn, table: str, column_sql: str) -> None:
     try:
         await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_sql}"))
     except OperationalError:
-        # ستون از قبل وجود دارد.
         pass
 
 
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-        # برای دیتابیس‌های قدیمی که قبل از این آپدیت ساخته شده‌اند.
         await _add_column_if_missing(conn, "files", "telegram_file_id VARCHAR(600)")
         await _add_column_if_missing(conn, "files", "file_type VARCHAR(50)")
