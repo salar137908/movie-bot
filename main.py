@@ -95,37 +95,27 @@ SECTION_KEY_HELP = "telegram | vpn | accounts | contact"
 # نکته: چون پیام‌ها با HTML ارسال می‌شوند، داخل متن راهنما از <ID> استفاده نکن.
 # تلگرام آن را مثل تگ HTML می‌خواند و خطای BadRequest می‌دهد.
 ADMIN_HELP_TEXT = """
-📌 <b>راهنمای ادمین</b>
+📌 راهنمای ادمین
 
 ➕ ثبت فایل:
-اول فایل را داخل کانال خصوصی آرشیو آپلود کن.
-بعد داخل ربات دکمه «ثبت فایل» را بزن و همان پیام فایل را از کانال آرشیو برای ربات فوروارد کن.
+از دکمه «➕ ثبت فایل» یا دستور /add استفاده کن، عنوان را بفرست و بعد فایل را از کانال آرشیو فوروارد کن.
 
-دستورها:
-/files — لیست فایل‌ها
-/del12 — غیرفعال کردن فایل، مثال: /del12
-/stats — آمار
-/debug_channel — تست تنظیمات کانال عضویت فایل‌ها
-/channels — مدیریت کانال‌های اجباری فایل‌ها
-/addchannel — انتخاب نوع عضویت اجباری از منو
-/addchannel @username — افزودن سریع کانال اجباری شروع ربات
-/setchannel @username — جایگزینی کانال اجباری فایل‌ها
-/delchannel ID — حذف کانال اجباری فایل‌ها، مثال: /delchannel 3
+📋 لیست فایل‌ها:
+/files
 
-➕ افزودن کانال اجباری از منو:
-/addchannel — انتخاب بخش، سپس ارسال یوزرنیم کانال
+📢 مدیریت کانال‌های اجباری:
+از دکمه «📢 کانال‌های اجباری» یا دستور /channels استفاده کن.
+در این بخش می‌توانی کانال‌های عضویت اجباری شروع ربات، فیلترشکن، اکانت‌ها و کانال تلگرام را جدا مدیریت کنی.
 
-🧩 کانال‌های اختصاصی دکمه‌های کاربر:
-/sectionchannels — لیست کانال‌های هر بخش
-/addvpnchannel @username — افزودن سریع کانال به بخش فیلترشکن
-/addaccountchannel @username — افزودن سریع کانال به بخش اکانت‌ها
-/addtelegramchannel @username — افزودن سریع کانال به بخش کانال تلگرام
+➕ افزودن کانال اجباری:
+/addchannel
+این دستور خالی کانال اضافه نمی‌کند؛ فقط منوی انتخاب بخش را باز می‌کند.
 
-دستور کامل‌تر:
-/addsectionchannel vpn @username — افزودن کانال به بخش دلخواه
-/delsectionchannel ID — حذف کانال اختصاصی
-/clearsection vpn — حذف همه کانال‌های یک بخش
-/debug_section vpn — تست عضویت و دسترسی کانال‌های یک بخش
+مسیر پیشنهادی:
+📢 کانال‌های اجباری → انتخاب بخش → افزودن کانال جدید → ارسال @username
+
+نکته:
+گزینه «ارتباط با تیم ما» عضویت اجباری جداگانه ندارد.
 """.strip()
 
 # ============================================================
@@ -166,7 +156,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
             [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_CHANNELS)],
             [KeyboardButton(text=BTN_ADD_REQUIRED_CHANNEL)],
-            [KeyboardButton(text=BTN_SECTION_CHANNELS), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
     )
@@ -401,7 +391,7 @@ async def send_section_flow(message: Message, section_key: str) -> None:
     if not channels:
         text = f"⚠️ برای بخش «{SECTION_TITLES[section_key]}» هنوز کانال عضویت تنظیم نشده است."
         if is_admin(message.from_user.id):
-            text += f"\n\nنمونه دستور:\n<code>/addsectionchannel {section_key} @YourChannel</code>"
+            text += "\n\nاز دکمه «📢 کانال‌های اجباری» بخش مورد نظر را انتخاب کن و کانال جدید اضافه کن."
         await message.answer(text, reply_markup=menu_for_user(message.from_user.id))
         return
 
@@ -599,19 +589,10 @@ async def handle_file_request(message: Message, payload: str) -> None:
         await message.answer(WELCOME_TEXT)
         return
 
+    # نسخه v6:
+    # لینک فایل هم از همان عضویت اجباری عمومی داخل دیتابیس استفاده می‌کند.
+    # دیگر به REQUIRED_CHANNEL_LINK داخل Railway وابسته نیست.
     if not await is_member(message.bot, message.from_user.id):
-        if not REQUIRED_CHANNEL_LINK:
-            await message.answer(
-                "⚠️ لینک عضویت کانال تنظیم نشده است. لطفاً به ادمین اطلاع بده."
-            )
-            await notify_admins(
-                message.bot,
-                "⚠️ REQUIRED_CHANNEL_LINK تنظیم نشده است.\n"
-                "برای نمایش دکمه عضویت، داخل .env این مقدار را بگذار:\n"
-                "<code>REQUIRED_CHANNEL_LINK=https://t.me/YourChannel</code>"
-            )
-            return
-
         await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard(payload))
         return
 
@@ -903,6 +884,30 @@ async def delete_file_handler(message: Message) -> None:
         await message.answer(f"✅ فایل {file_id} غیرفعال شد.")
     else:
         await message.answer("❌ فایل پیدا نشد.")
+
+
+
+# دستورهای قدیمی روش قبلی؛ دیگر اجرا نمی‌شوند تا ادمین فقط از پنل جدید استفاده کند.
+@router.message(Command("addsectionchannel"))
+@router.message(Command("delsectionchannel"))
+@router.message(Command("clearsection"))
+@router.message(Command("debug_section"))
+@router.message(Command("addvpnchannel"))
+@router.message(Command("addaccountchannel"))
+@router.message(Command("addtelegramchannel"))
+@router.message(Command("addcontactchannel"))
+@router.message(Command("sectionchannels"))
+@router.message(Command("setchannel"))
+@router.message(Command("delchannel"))
+async def old_channel_commands_disabled(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer(
+        "این دستور مربوط به روش قبلی بود و دیگر استفاده نمی‌شود.\n\n"
+        "برای مدیریت کانال‌ها از این مسیر استفاده کن:\n"
+        "📢 کانال‌های اجباری → انتخاب بخش → افزودن، ادیت یا حذف کانال",
+        reply_markup=admin_menu(),
+    )
 
 
 @router.message(F.text == BTN_ADD_REQUIRED_CHANNEL)
@@ -1632,7 +1637,19 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
 
-    # منوی شناور دستورها وقتی کاربر "/" می‌زند.
+    # پاک‌سازی دستورهای قدیمی تلگرام در منوی شناور "/"
+    # این کار باعث می‌شود دستورهای روش قبلی مثل addvpnchannel و addsectionchannel باقی نمانند.
+    try:
+        await bot.delete_my_commands(scope=BotCommandScopeDefault())
+    except Exception:
+        pass
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception:
+            pass
+
     # کاربران عادی فقط دستورهای ساده را می‌بینند.
     await bot.set_my_commands(
         [
@@ -1642,7 +1659,7 @@ async def main() -> None:
         scope=BotCommandScopeDefault(),
     )
 
-    # ادمین‌ها دستورهای مدیریتی را در منوی شناور "/" می‌بینند.
+    # ادمین‌ها فقط دستورهای ضروری فعلی را در منوی شناور "/" می‌بینند.
     admin_commands = [
         BotCommand(command="start", description="شروع ربات / پنل ادمین"),
         BotCommand(command="help", description="راهنمای ادمین"),
@@ -1650,19 +1667,7 @@ async def main() -> None:
         BotCommand(command="files", description="لیست فایل‌ها"),
         BotCommand(command="stats", description="آمار ربات"),
         BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
-        BotCommand(command="addchannel", description="افزودن کانال اجباری؛ اول بخش را انتخاب کن"),
-        BotCommand(command="addchannelmenu", description="منوی افزودن کانال اجباری"),
-        BotCommand(command="setchannel", description="جایگزینی کانال اصلی: /setchannel @username"),
-        BotCommand(command="delchannel", description="حذف کانال: /delchannel ID"),
-        BotCommand(command="debug_channel", description="تست دسترسی ربات به کانال‌های فایل"),
-        BotCommand(command="sectionchannels", description="کانال‌های اختصاصی دکمه‌های کاربر"),
-        BotCommand(command="addvpnchannel", description="افزودن کانال فیلترشکن؛ بعدش فقط @channel را بنویس"),
-        BotCommand(command="addaccountchannel", description="افزودن کانال اکانت‌ها؛ بعدش فقط @channel را بنویس"),
-        BotCommand(command="addtelegramchannel", description="افزودن کانال تلگرام؛ بعدش فقط @channel را بنویس"),
-        BotCommand(command="addsectionchannel", description="افزودن کانال با کلید بخش؛ /addsectionchannel vpn @channel"),
-        BotCommand(command="delsectionchannel", description="حذف کانال بخش: /delsectionchannel ID"),
-        BotCommand(command="clearsection", description="پاک کردن کانال‌های یک بخش"),
-        BotCommand(command="debug_section", description="تست کانال‌های یک بخش"),
+        BotCommand(command="addchannel", description="باز کردن منوی افزودن کانال اجباری"),
     ]
 
     for admin_id in ADMIN_IDS:
@@ -1674,7 +1679,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-start-gate-v4-admin-section-channel-menu")
+    print("Bot started — movie-file-gate-commands-clean-v7")
     await dp.start_polling(bot)
 
 
