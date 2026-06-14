@@ -105,3 +105,83 @@ __pycache__
 ```text
 /addchannel -1001234567890 https://t.me/+InviteLink
 ```
+
+
+## نسخه movie-section-gate-v1
+
+در این نسخه برای کاربران چهار دکمه اصلی اضافه شده است:
+
+- 📢 کانال تلگرام
+- 🔐 فیلترشکن پرمیوم رایگان
+- 💎 دریافت اکانت های پولی سایت های معروف
+- ☎️ ارتباط با تیم ما
+
+هر دکمه کانال‌های عضویت اجباری جداگانه خودش را دارد.
+
+کلیدهای هر بخش:
+
+- `telegram` برای کانال تلگرام
+- `vpn` برای فیلترشکن پرمیوم رایگان
+- `accounts` برای بخش اکانت‌ها
+- `contact` برای ارتباط با تیم ما
+
+نمونه افزودن کانال برای فیلترشکن:
+
+```text
+/addsectionchannel vpn @channel1
+/addsectionchannel vpn @channel2
+/addsectionchannel vpn @channel3
+/addsectionchannel vpn @channel4
+```
+
+نمونه افزودن کانال برای اکانت‌ها:
+
+```text
+/addsectionchannel accounts @channelA
+/addsectionchannel accounts @channelB
+```
+
+برای دیدن لیست کانال‌های اختصاصی:
+
+```text
+/sectionchannels
+```
+
+برای حذف کانال اختصاصی:
+
+```text
+/delsectionchannel 1
+```
+
+نکته: برای بخش اکانت‌ها فقط اطلاعات یا لینک‌هایی را قرار بده که مجوز انتشارش را داری.
+
+
+## نسخه v2 — دستورهای سریع ادمین برای افزودن کانال
+
+تلگرام اجازه نمی‌دهد متن کامل همراه آرگومان به صورت خودکار داخل باکس تایپ نوشته شود. برای همین در این نسخه دستورهای کوتاه جدا اضافه شده‌اند. ادمین وقتی `/` را بزند این دستورها را می‌بیند:
+
+- `/addvpnchannel`
+- `/addaccountchannel`
+- `/addtelegramchannel`
+- `/addcontactchannel`
+
+روش استفاده سریع:
+
+```text
+/addvpnchannel @channel1
+/addaccountchannel @channel2
+/addtelegramchannel @channel3
+/addcontactchannel @channel4
+```
+
+اگر ادمین فقط خود دستور را بفرستد، ربات مرحله بعدی را باز می‌کند و فقط اسم کانال را می‌پرسد. برای کانال خصوصی هم این قالب را بفرست:
+
+```text
+-1001234567890 https://t.me/+InviteLink
+```
+
+بعد از Deploy داخل Railway Logs باید این عبارت دیده شود:
+
+```text
+Bot started — movie-section-gate-v2-quick-admin-commands
+```

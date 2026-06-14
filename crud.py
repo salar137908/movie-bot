@@ -1,6 +1,6 @@
 from sqlalchemy import func, select, update
 
-from database import FileItem, RequiredChannel, SessionLocal, User
+from database import FileItem, RequiredChannel, SectionRequiredChannel, SessionLocal, User
 
 
 async def save_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
@@ -128,4 +128,69 @@ async def clear_required_channels() -> None:
 async def count_required_channels() -> int:
     async with SessionLocal() as session:
         result = await session.execute(select(func.count(RequiredChannel.id)).where(RequiredChannel.is_active.is_(True)))
+        return int(result.scalar() or 0)
+
+
+
+async def add_section_required_channel(section_key: str, chat_id: str, link: str | None = None, title: str | None = None) -> SectionRequiredChannel:
+    async with SessionLocal() as session:
+        section_key = str(section_key).strip()
+        chat_id = str(chat_id).strip()
+        result = await session.execute(
+            select(SectionRequiredChannel).where(
+                SectionRequiredChannel.section_key == section_key,
+                SectionRequiredChannel.chat_id == chat_id,
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            item = SectionRequiredChannel(section_key=section_key, chat_id=chat_id, link=link, title=title, is_active=True)
+            session.add(item)
+        else:
+            item.link = link
+            item.title = title
+            item.is_active = True
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def get_section_required_channels(section_key: str | None = None, active_only: bool = False) -> list[SectionRequiredChannel]:
+    async with SessionLocal() as session:
+        stmt = select(SectionRequiredChannel).order_by(SectionRequiredChannel.section_key.asc(), SectionRequiredChannel.id.desc())
+        if section_key:
+            stmt = stmt.where(SectionRequiredChannel.section_key == str(section_key).strip())
+        if active_only:
+            stmt = stmt.where(SectionRequiredChannel.is_active.is_(True))
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def disable_section_required_channel(channel_id: int) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(select(SectionRequiredChannel).where(SectionRequiredChannel.id == int(channel_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        item.is_active = False
+        await session.commit()
+        return True
+
+
+async def clear_section_required_channels(section_key: str) -> None:
+    async with SessionLocal() as session:
+        await session.execute(
+            update(SectionRequiredChannel)
+            .where(SectionRequiredChannel.section_key == str(section_key).strip())
+            .values(is_active=False)
+        )
+        await session.commit()
+
+
+async def count_section_required_channels(section_key: str | None = None) -> int:
+    async with SessionLocal() as session:
+        stmt = select(func.count(SectionRequiredChannel.id)).where(SectionRequiredChannel.is_active.is_(True))
+        if section_key:
+            stmt = stmt.where(SectionRequiredChannel.section_key == str(section_key).strip())
+        result = await session.execute(stmt)
         return int(result.scalar() or 0)

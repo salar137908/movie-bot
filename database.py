@@ -47,6 +47,18 @@ class RequiredChannel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SectionRequiredChannel(Base):
+    __tablename__ = "section_required_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    section_key: Mapped[str] = mapped_column(String(60), index=True)
+    chat_id: Mapped[str] = mapped_column(String(120), index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
