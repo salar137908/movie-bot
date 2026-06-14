@@ -48,13 +48,14 @@ BTN_STATS = "📊 آمار"
 BTN_HELP = "📌 راهنما"
 BTN_CHANNELS = "📢 کانال‌های اجباری"
 BTN_SECTION_CHANNELS = "🧩 کانال‌های بخش‌ها"
+BTN_ADD_REQUIRED_CHANNEL = "➕ افزودن کانال اجباری"
 
 BTN_USER_TELEGRAM = "📢 کانال تلگرام"
 BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
 
-JOIN_REQUIRED_TEXT = "🔒 برای دریافت فایل، ابتدا عضو کانال شوید.\n\nبعد از عضویت، به همین ربات برگردید و روی «✅ بررسی عضویت» بزنید 👇"
+JOIN_REQUIRED_TEXT = "🔒 برای استفاده از ربات، ابتدا عضو کانال‌های زیر شوید.\n\nبعد از عضویت، به همین ربات برگردید و روی «✅ بررسی عضویت» بزنید 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
 BTN_CHECK_JOIN = "✅ بررسی عضویت"
 
@@ -84,7 +85,7 @@ SECTION_RESULT_TEXTS: dict[str, str] = {
     "telegram": "✅ عضویت تایید شد.\n\n📢 دسترسی بخش کانال تلگرام فعال شد.",
     "vpn": "✅ عضویت تایید شد.\n\n🔐 بخش فیلترشکن پرمیوم رایگان فعال شد.\nمتن یا لینک نهایی این بخش را می‌توان بعداً داخل کد تنظیم کرد.",
     "accounts": "✅ عضویت تایید شد.\n\n💎 دسترسی این بخش فعال شد.\nفقط اطلاعاتی را قرار بده که مجوز انتشارش را داری.",
-    "contact": "✅ عضویت تایید شد.\n\n☎️ ارتباط با تیم ما فعال شد.\nپیام خودت را برای ادمین یا آیدی پشتیبانی ارسال کن.",
+    "contact": "☎️ ارتباط با تیم ما\n\nبرای ارتباط با تیم، پیام خودت را همینجا بفرست یا آیدی پشتیبانی را داخل متن این بخش قرار بده.\n\nاین گزینه عضویت اجباری جداگانه ندارد.",
 }
 
 SECTION_KEY_HELP = "telegram | vpn | accounts | contact"
@@ -106,16 +107,19 @@ ADMIN_HELP_TEXT = """
 /stats — آمار
 /debug_channel — تست تنظیمات کانال عضویت فایل‌ها
 /channels — مدیریت کانال‌های اجباری فایل‌ها
-/addchannel @username — افزودن کانال اجباری فایل‌ها
+/addchannel — انتخاب نوع عضویت اجباری از منو
+/addchannel @username — افزودن سریع کانال اجباری شروع ربات
 /setchannel @username — جایگزینی کانال اجباری فایل‌ها
 /delchannel ID — حذف کانال اجباری فایل‌ها، مثال: /delchannel 3
+
+➕ افزودن کانال اجباری از منو:
+/addchannel — انتخاب بخش، سپس ارسال یوزرنیم کانال
 
 🧩 کانال‌های اختصاصی دکمه‌های کاربر:
 /sectionchannels — لیست کانال‌های هر بخش
 /addvpnchannel @username — افزودن سریع کانال به بخش فیلترشکن
 /addaccountchannel @username — افزودن سریع کانال به بخش اکانت‌ها
 /addtelegramchannel @username — افزودن سریع کانال به بخش کانال تلگرام
-/addcontactchannel @username — افزودن سریع کانال به بخش ارتباط
 
 دستور کامل‌تر:
 /addsectionchannel vpn @username — افزودن کانال به بخش دلخواه
@@ -161,10 +165,130 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_USER_ACCOUNTS), KeyboardButton(text=BTN_USER_CONTACT)],
             [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
             [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_CHANNELS)],
+            [KeyboardButton(text=BTN_ADD_REQUIRED_CHANNEL)],
             [KeyboardButton(text=BTN_SECTION_CHANNELS), KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
     )
+
+
+def menu_for_user(user_id: int) -> ReplyKeyboardMarkup:
+    return admin_menu() if is_admin(user_id) else user_menu()
+
+def add_required_channel_target_kb() -> InlineKeyboardMarkup:
+    """Admin helper: choose where the forced-join channel should be used."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚪 عضویت اجباری شروع ربات", callback_data="addgate:main")],
+            [InlineKeyboardButton(text="🔐 فیلترشکن پرمیوم رایگان", callback_data="addgate:vpn")],
+            [InlineKeyboardButton(text="💎 اکانت های پولی سایت های معروف", callback_data="addgate:accounts")],
+            [InlineKeyboardButton(text="📢 کانال تلگرام", callback_data="addgate:telegram")],
+        ]
+    )
+
+
+# ============================================================
+# پنل شیشه‌ای مدیریت کانال‌های اجباری برای ادمین
+# ============================================================
+
+CHANNEL_MANAGER_TARGETS: dict[str, str] = {
+    "main": "🚪 عضویت اجباری شروع ربات",
+    "vpn": BTN_USER_VPN_PREMIUM,
+    "accounts": BTN_USER_ACCOUNTS,
+    "telegram": BTN_USER_TELEGRAM,
+}
+
+
+def channel_manager_root_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚪 عضویت اجباری شروع ربات", callback_data="managegate:main")],
+            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM, callback_data="managegate:vpn")],
+            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS, callback_data="managegate:accounts")],
+            [InlineKeyboardButton(text=BTN_USER_TELEGRAM, callback_data="managegate:telegram")],
+            [InlineKeyboardButton(text="➕ افزودن کانال اجباری", callback_data="manageaddmenu")],
+        ]
+    )
+
+
+async def send_channel_manager_root(message_or_call) -> None:
+    text = (
+        "📢 <b>مدیریت کانال‌های اجباری</b>\n\n"
+        "اول انتخاب کن کانال‌های کدام بخش را می‌خوای ببینی یا تغییر بدی.\n\n"
+        "• عضویت اجباری شروع ربات: قبل از نمایش منوی اصلی\n"
+        "• فیلترشکن پرمیوم رایگان: فقط برای همان گزینه\n"
+        "• اکانت‌های پولی: فقط برای همان گزینه\n"
+        "• کانال تلگرام: فقط برای همان گزینه\n\n"
+        "گزینه ارتباط با تیم ما عضویت اجباری جداگانه ندارد."
+    )
+    if isinstance(message_or_call, CallbackQuery):
+        try:
+            await message_or_call.message.edit_text(text, reply_markup=channel_manager_root_kb())
+        except Exception:
+            await message_or_call.message.answer(text, reply_markup=channel_manager_root_kb())
+        await message_or_call.answer()
+    else:
+        await message_or_call.answer(text, reply_markup=channel_manager_root_kb())
+
+
+async def _target_channels(target: str, active_only: bool = True):
+    if target == "main":
+        return await crud.get_required_channels(active_only=active_only)
+    return await crud.get_section_required_channels(section_key=target, active_only=active_only)
+
+
+def _channel_item_text(ch, target: str) -> str:
+    status = "✅ فعال" if getattr(ch, "is_active", False) else "❌ غیرفعال"
+    section_line = "" if target == "main" else f"بخش: <b>{CHANNEL_MANAGER_TARGETS.get(target, target)}</b>\n"
+    return (
+        f"{status}\n"
+        f"ID: <code>{ch.id}</code>\n"
+        f"{section_line}"
+        f"عنوان: <b>{getattr(ch, 'title', None) or '-'}</b>\n"
+        f"Chat: <code>{getattr(ch, 'chat_id', '-') or '-'}</code>\n"
+        f"Link: <code>{getattr(ch, 'link', None) or '-'}</code>"
+    )
+
+
+def channel_manager_list_kb(target: str, channels) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for ch in channels:
+        title = getattr(ch, "title", None) or getattr(ch, "chat_id", "کانال")
+        short_title = str(title)[:24]
+        rows.append([InlineKeyboardButton(text=f"📌 {short_title}", callback_data=f"noop:{target}:{ch.id}")])
+        rows.append([
+            InlineKeyboardButton(text="✏️ ادیت", callback_data=f"manageedit:{target}:{ch.id}"),
+            InlineKeyboardButton(text="🗑 حذف", callback_data=f"managedel:{target}:{ch.id}"),
+        ])
+    rows.append([InlineKeyboardButton(text="➕ افزودن کانال جدید", callback_data=f"manageadd:{target}")])
+    rows.append([InlineKeyboardButton(text="🔙 برگشت به بخش‌ها", callback_data="manageback")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def send_channel_target_list(message_or_call, target: str) -> None:
+    if target not in CHANNEL_MANAGER_TARGETS:
+        if isinstance(message_or_call, CallbackQuery):
+            await message_or_call.answer("بخش نامعتبر است.", show_alert=True)
+        return
+    channels = await _target_channels(target, active_only=True)
+    title = CHANNEL_MANAGER_TARGETS[target]
+    lines = [f"📢 <b>{title}</b>\n"]
+    if not channels:
+        lines.append("هنوز برای این بخش کانال فعالی ثبت نشده است. از دکمه افزودن استفاده کن.")
+    else:
+        lines.append("لیست کانال‌های فعال این بخش:\n")
+        for ch in channels:
+            lines.append(_channel_item_text(ch, target) + "\n")
+    text = "\n".join(lines)
+    kb = channel_manager_list_kb(target, channels)
+    if isinstance(message_or_call, CallbackQuery):
+        try:
+            await message_or_call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            await message_or_call.message.answer(text, reply_markup=kb)
+        await message_or_call.answer()
+    else:
+        await message_or_call.answer(text, reply_markup=kb)
 
 
 async def get_join_channels() -> list[dict[str, str]]:
@@ -265,19 +389,30 @@ async def send_section_flow(message: Message, section_key: str) -> None:
         await message.answer("❌ این بخش پیدا نشد.")
         return
 
+    # گزینه ارتباط با تیم ما عضویت اجباری جداگانه ندارد.
+    if section_key == "contact":
+        await message.answer(
+            SECTION_RESULT_TEXTS.get(section_key, "☎️ ارتباط با تیم ما"),
+            reply_markup=menu_for_user(message.from_user.id),
+        )
+        return
+
     channels = await get_section_join_channels(section_key)
     if not channels:
         text = f"⚠️ برای بخش «{SECTION_TITLES[section_key]}» هنوز کانال عضویت تنظیم نشده است."
         if is_admin(message.from_user.id):
             text += f"\n\nنمونه دستور:\n<code>/addsectionchannel {section_key} @YourChannel</code>"
-        await message.answer(text, reply_markup=admin_menu() if is_admin(message.from_user.id) else user_menu())
+        await message.answer(text, reply_markup=menu_for_user(message.from_user.id))
         return
 
     if not await is_section_member(message.bot, message.from_user.id, section_key):
         await message.answer(section_join_text(section_key), reply_markup=await section_join_keyboard(section_key))
         return
 
-    await message.answer(SECTION_RESULT_TEXTS.get(section_key, "✅ عضویت تایید شد."), reply_markup=admin_menu() if is_admin(message.from_user.id) else user_menu())
+    await message.answer(
+        SECTION_RESULT_TEXTS.get(section_key, "✅ عضویت تایید شد."),
+        reply_markup=menu_for_user(message.from_user.id),
+    )
 
 
 def extract_file_id_from_payload(payload: str | None) -> int | None:
@@ -496,6 +631,11 @@ async def start_handler(message: Message, command: CommandStart) -> None:
         await handle_file_request(message, payload)
         return
 
+    # عضویت اجباری عمومی: کاربر اول عضو کانال‌های اصلی می‌شود، بعد منوی کاربر را می‌بیند.
+    if not await is_member(message.bot, message.from_user.id):
+        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        return
+
     if is_admin(message.from_user.id):
         await message.answer(ADMIN_WELCOME_TEXT, reply_markup=admin_menu())
     else:
@@ -509,6 +649,12 @@ async def user_section_button_handler(message: Message) -> None:
         username=message.from_user.username,
         full_name=message.from_user.full_name,
     )
+
+    # اگر کاربر از قبل منو را دیده اما هنوز عضو کانال‌های اصلی نیست، دوباره گیت عمومی را نشان بده.
+    if not await is_member(message.bot, message.from_user.id):
+        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        return
+
     section_key = SECTION_BUTTON_TO_KEY.get(message.text or "")
     if section_key:
         await send_section_flow(message, section_key)
@@ -539,6 +685,28 @@ async def section_check_callback(call: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("check:"))
 async def check_join_callback(call: CallbackQuery) -> None:
     payload = call.data.split(":", 1)[1]
+
+    # بررسی عضویت عمومی برای نمایش منوی اصلی ربات
+    if payload == "menu":
+        if not await is_member(call.bot, call.from_user.id):
+            await call.answer("هنوز عضویت شما تایید نشده است.", show_alert=True)
+            try:
+                await call.message.edit_text(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+            except Exception:
+                pass
+            return
+
+        await call.answer("عضویت تایید شد ✅")
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        if is_admin(call.from_user.id):
+            await call.message.answer(ADMIN_WELCOME_TEXT, reply_markup=admin_menu())
+        else:
+            await call.message.answer("✅ عضویت تایید شد.\n\nاز منوی زیر انتخاب کن:", reply_markup=user_menu())
+        return
+
     file_id = extract_file_id_from_payload(payload)
     if file_id is None:
         await call.answer("لینک فایل نامعتبر است.", show_alert=True)
@@ -737,47 +905,60 @@ async def delete_file_handler(message: Message) -> None:
         await message.answer("❌ فایل پیدا نشد.")
 
 
-@router.message(F.text == BTN_CHANNELS)
+@router.message(F.text == BTN_ADD_REQUIRED_CHANNEL)
+@router.message(Command("addchannelmenu"))
+async def add_required_channel_menu_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer(
+        "➕ می‌خوای عضویت اجباری برای کدام بخش اضافه شود؟\n\n"
+        "بعد از انتخاب، فقط یوزرنیم کانال را می‌فرستی.\n"
+        "مثال: <code>@YourChannel</code>",
+        reply_markup=add_required_channel_target_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("addgate:"))
+async def add_required_channel_target_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    target = call.data.split(":", 1)[1]
+    if target == "contact":
+        await call.answer("ارتباط با تیم ما عضویت اجباری جداگانه ندارد.", show_alert=True)
+        return
+    if target != "main" and target not in SECTION_TITLES:
+        await call.answer("بخش نامعتبر است.", show_alert=True)
+        return
+
+    await state.set_state(AddSectionChannelState.channel)
+    if target == "main":
+        await state.update_data(target_type="main")
+        title = "عضویت اجباری شروع ربات"
+    else:
+        await state.update_data(target_type="section", section_key=target)
+        title = SECTION_TITLES.get(target, target)
+
+    await call.message.answer(
+        f"✅ بخش انتخاب شد: <b>{title}</b>\n\n"
+        "حالا فقط یوزرنیم کانالی را بفرست که می‌خوای عضویت اجباری برای آن فعال شود.\n\n"
+        "نمونه کانال عمومی:\n"
+        "<code>@YourChannel</code>\n\n"
+        "اگر کانال خصوصی است، این مدل را بفرست:\n"
+        "<code>-1001234567890 https://t.me/+InviteLink</code>"
+    )
+    await call.answer()
+
+
+@router.message(F.text.in_({BTN_CHANNELS, BTN_SECTION_CHANNELS}))
 @router.message(Command("channels"))
+@router.message(Command("sectionchannels"))
 async def channels_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
         return
-
-    db_channels = await crud.get_required_channels(active_only=False)
-    lines = ["📢 <b>مدیریت کانال‌های اجباری</b>\n"]
-
-    if db_channels:
-        for ch in db_channels:
-            status = "✅ فعال" if ch.is_active else "❌ غیرفعال"
-            lines.append(
-                f"{status}\n"
-                f"ID: <code>{ch.id}</code>\n"
-                f"عنوان: <b>{ch.title or '-'}</b>\n"
-                f"Chat: <code>{ch.chat_id}</code>\n"
-                f"Link: <code>{ch.link or '-'}</code>\n"
-                f"حذف: /delchannel{ch.id}\n"
-            )
-    else:
-        lines.append("هنوز کانالی از داخل ربات ثبت نشده است.")
-        if REQUIRED_CHANNEL:
-            lines.append(
-                "\nفعلاً ربات از تنظیمات Railway/.env استفاده می‌کند:\n"
-                f"REQUIRED_CHANNEL: <code>{REQUIRED_CHANNEL}</code>\n"
-                f"REQUIRED_CHANNEL_LINK: <code>{REQUIRED_CHANNEL_LINK or 'خالی'}</code>"
-            )
-
-    lines.append(
-        "\n<b>دستورها:</b>\n"
-        "افزودن کانال عمومی:\n"
-        "<code>/addchannel @irfreenet</code>\n\n"
-        "جایگزینی همه کانال‌ها با یک کانال:\n"
-        "<code>/setchannel @irfreenet</code>\n\n"
-        "اگر کانال خصوصی است:\n"
-        "<code>/addchannel -1001234567890 https://t.me/+InviteLink</code>\n\n"
-        "حذف کانال:\n"
-        "<code>/delchannel 1</code>"
-    )
-    await message.answer("\n".join(lines))
+    await send_channel_manager_root(message)
 
 
 async def _validate_and_save_channel(bot: Bot, chat_id: str, link: str | None, replace_all: bool = False):
@@ -805,10 +986,9 @@ async def add_channel_handler(message: Message) -> None:
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) < 2:
         await message.answer(
-            "فرمت درست:\n"
-            "<code>/addchannel @irfreenet</code>\n\n"
-            "برای کانال خصوصی:\n"
-            "<code>/addchannel -1001234567890 https://t.me/+InviteLink</code>"
+            "این دستور خالی اجرا نمی‌شود و هیچ کانالی اضافه نشد.\n\n"
+            "اول انتخاب کن این کانال برای کدام بخش عضویت اجباری شود:",
+            reply_markup=add_required_channel_target_kb(),
         )
         return
 
@@ -896,6 +1076,122 @@ async def delete_channel_handler(message: Message) -> None:
         await message.answer("❌ کانال پیدا نشد.")
 
 
+@router.callback_query(F.data == "manageback")
+async def manage_channels_back_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    await send_channel_manager_root(call)
+
+
+@router.callback_query(F.data == "manageaddmenu")
+async def manage_add_menu_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    try:
+        await call.message.edit_text(
+            "➕ می‌خوای عضویت اجباری برای کدام بخش اضافه شود؟\n\n"
+            "بخش را انتخاب کن، بعد فقط یوزرنیم کانال را بفرست.",
+            reply_markup=add_required_channel_target_kb(),
+        )
+    except Exception:
+        await call.message.answer(
+            "➕ می‌خوای عضویت اجباری برای کدام بخش اضافه شود؟",
+            reply_markup=add_required_channel_target_kb(),
+        )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("managegate:"))
+async def manage_channel_target_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    target = call.data.split(":", 1)[1]
+    await send_channel_target_list(call, target)
+
+
+@router.callback_query(F.data.startswith("manageadd:"))
+async def manage_channel_add_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    target = call.data.split(":", 1)[1]
+    if target not in CHANNEL_MANAGER_TARGETS:
+        await call.answer("بخش نامعتبر است.", show_alert=True)
+        return
+    await state.set_state(AddSectionChannelState.channel)
+    if target == "main":
+        await state.update_data(target_type="main")
+    else:
+        await state.update_data(target_type="section", section_key=target)
+    await call.message.answer(
+        f"➕ افزودن کانال برای <b>{CHANNEL_MANAGER_TARGETS[target]}</b>\n\n"
+        "حالا فقط یوزرنیم کانال را بفرست. نمونه:\n"
+        "<code>@YourChannel</code>\n\n"
+        "اگر کانال خصوصی است، این مدل را بفرست:\n"
+        "<code>-1001234567890 https://t.me/+InviteLink</code>"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("managedel:"))
+async def manage_channel_delete_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    try:
+        _, target, raw_id = call.data.split(":", 2)
+        channel_id = int(raw_id)
+    except Exception:
+        await call.answer("درخواست نامعتبر است.", show_alert=True)
+        return
+    if target == "main":
+        ok = await crud.disable_required_channel(channel_id)
+    else:
+        ok = await crud.disable_section_required_channel(channel_id)
+    if not ok:
+        await call.answer("کانال پیدا نشد.", show_alert=True)
+        return
+    await call.answer("کانال حذف شد ✅", show_alert=True)
+    await send_channel_target_list(call, target)
+
+
+@router.callback_query(F.data.startswith("manageedit:"))
+async def manage_channel_edit_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    try:
+        _, target, raw_id = call.data.split(":", 2)
+        channel_id = int(raw_id)
+    except Exception:
+        await call.answer("درخواست نامعتبر است.", show_alert=True)
+        return
+    if target not in CHANNEL_MANAGER_TARGETS:
+        await call.answer("بخش نامعتبر است.", show_alert=True)
+        return
+    await state.set_state(AddSectionChannelState.channel)
+    if target == "main":
+        await state.update_data(target_type="edit_main", edit_id=channel_id)
+    else:
+        await state.update_data(target_type="edit_section", section_key=target, edit_id=channel_id)
+    await call.message.answer(
+        f"✏️ ادیت کانال بخش <b>{CHANNEL_MANAGER_TARGETS[target]}</b>\n\n"
+        "یوزرنیم یا آیدی جدید کانال را بفرست. نمونه:\n"
+        "<code>@NewChannel</code>\n\n"
+        "برای کانال خصوصی:\n"
+        "<code>-1001234567890 https://t.me/+InviteLink</code>"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("noop:"))
+async def noop_callback(call: CallbackQuery) -> None:
+    await call.answer()
+
+
 @router.message(F.text == BTN_SECTION_CHANNELS)
 @router.message(Command("sectionchannels"))
 async def section_channels_handler(message: Message) -> None:
@@ -904,7 +1200,7 @@ async def section_channels_handler(message: Message) -> None:
 
     channels = await crud.get_section_required_channels(active_only=False)
     lines = ["🧩 <b>کانال‌های عضویت اختصاصی بخش‌ها</b>\n"]
-    lines.append("کلیدهای مجاز: <code>telegram</code>، <code>vpn</code>، <code>accounts</code>، <code>contact</code>\n")
+    lines.append("کلیدهای مجاز: <code>telegram</code>، <code>vpn</code>، <code>accounts</code>\n")
 
     if channels:
         for ch in channels:
@@ -1000,6 +1296,40 @@ async def add_section_channel_handler(message: Message) -> None:
 
 
 
+async def _save_main_required_channel(message: Message, channel_text: str) -> None:
+    """Save a general /start forced-join channel from a plain @username or private channel id + invite link."""
+    raw = (channel_text or "").strip()
+    if not raw:
+        await message.answer("❌ اسم کانال خالی است. مثلا بنویس: <code>@YourChannel</code>")
+        return
+
+    parts = raw.split(maxsplit=1)
+    chat_id = parts[0].strip()
+    link = parts[1].strip() if len(parts) > 1 else None
+
+    try:
+        item = await _validate_and_save_channel(message.bot, chat_id=chat_id, link=link, replace_all=False)
+    except Exception as e:
+        await message.answer(
+            "❌ کانال اصلی اضافه نشد.\n\n"
+            "ربات باید داخل آن کانال ادمین باشد و مقدار کانال درست باشد.\n"
+            "برای کانال عمومی نمونه: <code>@YourChannel</code>\n"
+            "برای کانال خصوصی نمونه: <code>-1001234567890 https://t.me/+InviteLink</code>\n\n"
+            f"Error: <code>{type(e).__name__}: {e}</code>"
+        )
+        return
+
+    await message.answer(
+        "✅ کانال عضویت اجباری شروع ربات اضافه شد.\n\n"
+        "از این به بعد کاربر بعد از /start اول باید عضو این کانال شود، بعد منوی اصلی را می‌بیند.\n\n"
+        f"ID: <code>{item.id}</code>\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"Chat: <code>{item.chat_id}</code>\n"
+        f"Link: <code>{item.link or '-'}</code>",
+        reply_markup=admin_menu(),
+    )
+
+
 async def _save_quick_section_channel(message: Message, section_key: str, channel_text: str) -> None:
     if section_key not in SECTION_TITLES:
         await message.answer(f"❌ بخش نامعتبر است. کلیدهای مجاز: <code>{SECTION_KEY_HELP}</code>")
@@ -1073,7 +1403,81 @@ async def add_telegram_section_channel_handler(message: Message, state: FSMConte
 
 @router.message(Command("addcontactchannel"))
 async def add_contact_section_channel_handler(message: Message, state: FSMContext) -> None:
-    await _quick_section_command(message, state, "contact")
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("گزینه ارتباط با تیم ما عضویت اجباری جداگانه ندارد؛ برای این بخش کانال اضافه نمی‌شود.")
+
+
+async def _edit_main_required_channel(message: Message, channel_id: int, channel_text: str) -> None:
+    raw = (channel_text or "").strip()
+    if not raw:
+        await message.answer("❌ اسم کانال خالی است. مثلا بنویس: <code>@YourChannel</code>")
+        return
+    parts = raw.split(maxsplit=1)
+    chat_id = parts[0].strip()
+    link = parts[1].strip() if len(parts) > 1 else None
+    try:
+        chat = await message.bot.get_chat(chat_id)
+        title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+        if not link and getattr(chat, "username", None):
+            link = f"https://t.me/{chat.username}"
+        item = await crud.update_required_channel(channel_id, chat_id=str(chat_id), link=link, title=title)
+    except Exception as e:
+        await message.answer(
+            "❌ کانال ادیت نشد.\n\n"
+            "ربات باید داخل کانال ادمین باشد و مقدار کانال درست باشد.\n"
+            f"Error: <code>{type(e).__name__}: {e}</code>"
+        )
+        return
+    if not item:
+        await message.answer("❌ کانال پیدا نشد.")
+        return
+    await message.answer(
+        "✅ کانال عضویت اجباری شروع ربات ادیت شد.\n\n"
+        f"ID: <code>{item.id}</code>\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"Chat: <code>{item.chat_id}</code>\n"
+        f"Link: <code>{item.link or '-'}</code>",
+        reply_markup=admin_menu(),
+    )
+
+
+async def _edit_section_required_channel(message: Message, section_key: str, channel_id: int, channel_text: str) -> None:
+    if section_key not in SECTION_TITLES:
+        await message.answer(f"❌ بخش نامعتبر است. کلیدهای مجاز: <code>{SECTION_KEY_HELP}</code>")
+        return
+    raw = (channel_text or "").strip()
+    if not raw:
+        await message.answer("❌ اسم کانال خالی است. مثلا بنویس: <code>@YourChannel</code>")
+        return
+    parts = raw.split(maxsplit=1)
+    chat_id = parts[0].strip()
+    link = parts[1].strip() if len(parts) > 1 else None
+    try:
+        chat = await message.bot.get_chat(chat_id)
+        title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+        if not link and getattr(chat, "username", None):
+            link = f"https://t.me/{chat.username}"
+        item = await crud.update_section_required_channel(channel_id, chat_id=str(chat_id), link=link, title=title)
+    except Exception as e:
+        await message.answer(
+            "❌ کانال ادیت نشد.\n\n"
+            "ربات باید داخل کانال ادمین باشد و مقدار کانال درست باشد.\n"
+            f"Error: <code>{type(e).__name__}: {e}</code>"
+        )
+        return
+    if not item:
+        await message.answer("❌ کانال پیدا نشد.")
+        return
+    await message.answer(
+        "✅ کانال اختصاصی بخش ادیت شد.\n\n"
+        f"بخش: <b>{SECTION_TITLES.get(section_key, section_key)}</b>\n"
+        f"ID: <code>{item.id}</code>\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"Chat: <code>{item.chat_id}</code>\n"
+        f"Link: <code>{item.link or '-'}</code>",
+        reply_markup=admin_menu(),
+    )
 
 
 @router.message(AddSectionChannelState.channel)
@@ -1083,8 +1487,22 @@ async def add_section_channel_state_handler(message: Message, state: FSMContext)
         return
 
     data = await state.get_data()
+    target_type = data.get("target_type", "section")
     section_key = data.get("section_key")
     await state.clear()
+
+    if target_type == "main":
+        await _save_main_required_channel(message, message.text or "")
+        return
+
+    if target_type == "edit_main":
+        await _edit_main_required_channel(message, int(data.get("edit_id", 0)), message.text or "")
+        return
+
+    if target_type == "edit_section":
+        await _edit_section_required_channel(message, str(section_key or ""), int(data.get("edit_id", 0)), message.text or "")
+        return
+
     await _save_quick_section_channel(message, str(section_key or ""), message.text or "")
 
 
@@ -1232,15 +1650,15 @@ async def main() -> None:
         BotCommand(command="files", description="لیست فایل‌ها"),
         BotCommand(command="stats", description="آمار ربات"),
         BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
-        BotCommand(command="addchannel", description="افزودن کانال: /addchannel @username"),
-        BotCommand(command="setchannel", description="جایگزینی کانال: /setchannel @username"),
+        BotCommand(command="addchannel", description="افزودن کانال اجباری؛ اول بخش را انتخاب کن"),
+        BotCommand(command="addchannelmenu", description="منوی افزودن کانال اجباری"),
+        BotCommand(command="setchannel", description="جایگزینی کانال اصلی: /setchannel @username"),
         BotCommand(command="delchannel", description="حذف کانال: /delchannel ID"),
         BotCommand(command="debug_channel", description="تست دسترسی ربات به کانال‌های فایل"),
         BotCommand(command="sectionchannels", description="کانال‌های اختصاصی دکمه‌های کاربر"),
         BotCommand(command="addvpnchannel", description="افزودن کانال فیلترشکن؛ بعدش فقط @channel را بنویس"),
         BotCommand(command="addaccountchannel", description="افزودن کانال اکانت‌ها؛ بعدش فقط @channel را بنویس"),
         BotCommand(command="addtelegramchannel", description="افزودن کانال تلگرام؛ بعدش فقط @channel را بنویس"),
-        BotCommand(command="addcontactchannel", description="افزودن کانال ارتباط؛ بعدش فقط @channel را بنویس"),
         BotCommand(command="addsectionchannel", description="افزودن کانال با کلید بخش؛ /addsectionchannel vpn @channel"),
         BotCommand(command="delsectionchannel", description="حذف کانال بخش: /delsectionchannel ID"),
         BotCommand(command="clearsection", description="پاک کردن کانال‌های یک بخش"),
@@ -1256,7 +1674,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-section-gate-v2-quick-admin-commands")
+    print("Bot started — movie-start-gate-v4-admin-section-channel-menu")
     await dp.start_polling(bot)
 
 

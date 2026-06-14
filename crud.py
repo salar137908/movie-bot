@@ -194,3 +194,33 @@ async def count_section_required_channels(section_key: str | None = None) -> int
             stmt = stmt.where(SectionRequiredChannel.section_key == str(section_key).strip())
         result = await session.execute(stmt)
         return int(result.scalar() or 0)
+
+
+async def update_required_channel(channel_id: int, chat_id: str, link: str | None = None, title: str | None = None) -> RequiredChannel | None:
+    async with SessionLocal() as session:
+        result = await session.execute(select(RequiredChannel).where(RequiredChannel.id == int(channel_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return None
+        item.chat_id = str(chat_id).strip()
+        item.link = link
+        item.title = title
+        item.is_active = True
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def update_section_required_channel(channel_id: int, chat_id: str, link: str | None = None, title: str | None = None) -> SectionRequiredChannel | None:
+    async with SessionLocal() as session:
+        result = await session.execute(select(SectionRequiredChannel).where(SectionRequiredChannel.id == int(channel_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return None
+        item.chat_id = str(chat_id).strip()
+        item.link = link
+        item.title = title
+        item.is_active = True
+        await session.commit()
+        await session.refresh(item)
+        return item
