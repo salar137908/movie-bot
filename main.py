@@ -38,6 +38,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
+BOT_VERSION = "movie-bot-v7.2-file-manager-buttons"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -48,7 +49,7 @@ BTN_STATS = "📊 آمار"
 BTN_HELP = "📌 راهنما"
 BTN_CHANNELS = "📢 کانال‌های اجباری"
 BTN_SECTION_CHANNELS = "🧩 کانال‌های بخش‌ها"
-BTN_ADD_REQUIRED_CHANNEL = "➕ افزودن کانال اجباری"
+BTN_ADD_REQUIRED_CHANNEL = "➕ مدیریت و افزودن کانال اجباری"
 
 BTN_USER_TELEGRAM = "📢 کانال تلگرام"
 BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
@@ -128,6 +129,10 @@ class AddFileState(StatesGroup):
     forwarded_file = State()
 
 
+class EditFileState(StatesGroup):
+    title = State()
+
+
 class AddSectionChannelState(StatesGroup):
     channel = State()
 
@@ -204,8 +209,12 @@ def channel_manager_root_kb() -> InlineKeyboardMarkup:
 async def send_channel_manager_root(message_or_call) -> None:
     text = (
         "📢 <b>مدیریت کانال‌های اجباری</b>\n\n"
-        "اول انتخاب کن کانال‌های کدام بخش را می‌خوای ببینی یا تغییر بدی.\n\n"
-        "• عضویت اجباری شروع ربات: قبل از نمایش منوی اصلی\n"
+        "اول بخش مورد نظر را انتخاب کن. بعد از انتخاب بخش، لیست کانال‌های همان بخش نمایش داده می‌شود.\n\n"
+        "داخل هر بخش این گزینه‌ها را داری:\n"
+        "➕ افزودن کانال جدید\n"
+        "✏️ ادیت کانال\n"
+        "🗑 حذف کانال\n\n"
+        "• عضویت اجباری شروع ربات: برای /start و لینک فایل\n"
         "• فیلترشکن پرمیوم رایگان: فقط برای همان گزینه\n"
         "• اکانت‌های پولی: فقط برای همان گزینه\n"
         "• کانال تلگرام: فقط برای همان گزینه\n\n"
@@ -599,6 +608,22 @@ async def handle_file_request(message: Message, payload: str) -> None:
     await send_file_to_user(message.bot, message.chat.id, file_id)
 
 
+
+@router.message(Command("cancel"))
+async def cancel_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer("✅ عملیات فعلی لغو شد. حالا از منوی پایین ادامه بده.", reply_markup=admin_menu())
+
+
+@router.message(Command("version"))
+async def version_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer(f"✅ نسخه فعال: <code>{BOT_VERSION}</code>")
+
+
 @router.message(CommandStart())
 async def start_handler(message: Message, command: CommandStart) -> None:
     await crud.save_user(
@@ -847,6 +872,38 @@ async def add_file_forwarded(message: Message, state: FSMContext) -> None:
     )
 
 
+
+def file_manage_kb(file_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    toggle_text = "⛔️ غیرفعال کردن" if is_active else "✅ فعال کردن"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ ادیت عنوان", callback_data=f"fileedit:{file_id}"),
+                InlineKeyboardButton(text=toggle_text, callback_data=f"filetoggle:{file_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="🗑 حذف کامل", callback_data=f"filedelete:{file_id}"),
+            ],
+        ]
+    )
+
+
+async def send_file_card(message: Message, item, bot: Bot | None = None) -> None:
+    bot = bot or message.bot
+    me = await bot.get_me()
+    status = "✅ فعال" if item.is_active else "❌ غیرفعال"
+    link = f"https://t.me/{me.username}?start=f_{item.id}"
+    text = (
+        f"🎬 <b>فایل #{item.id}</b>\n\n"
+        f"وضعیت: {status}\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"نوع: <code>{getattr(item, 'file_type', None) or 'old'}</code>\n"
+        f"بازدید: <code>{item.views}</code>\n\n"
+        f"لینک مخصوص:\n<code>{link}</code>"
+    )
+    await message.answer(text, reply_markup=file_manage_kb(item.id, bool(item.is_active)))
+
+
 @router.message(F.text == BTN_FILES)
 @router.message(Command("files"))
 async def files_handler(message: Message) -> None:
@@ -857,21 +914,9 @@ async def files_handler(message: Message) -> None:
         await message.answer("هنوز فایلی ثبت نشده است.")
         return
 
-    me = await message.bot.get_me()
-    lines = ["📋 <b>لیست فایل‌ها</b>\n"]
+    await message.answer("📋 <b>لیست فایل‌ها</b>\n\nبرای هر فایل می‌تونی ادیت، غیرفعال یا حذف کامل بزنی.")
     for item in items:
-        status = "✅ فعال" if item.is_active else "❌ غیرفعال"
-        link = f"https://t.me/{me.username}?start=f_{item.id}"
-        lines.append(
-            f"{status}\n"
-            f"ID: <code>{item.id}</code>\n"
-            f"عنوان: {item.title}\n"
-            f"نوع: <code>{getattr(item, 'file_type', None) or 'old'}</code>\n"
-            f"بازدید: {item.views}\n"
-            f"لینک: <code>{link}</code>\n"
-            f"حذف: /del{item.id}\n"
-        )
-    await message.answer("\n".join(lines))
+        await send_file_card(message, item)
 
 
 @router.message(F.text.regexp(r"^/del\d+$"))
@@ -879,11 +924,147 @@ async def delete_file_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
         return
     file_id = int(message.text.replace("/del", ""))
-    ok = await crud.disable_file(file_id)
+    ok = await crud.set_file_active(file_id, False)
     if ok:
         await message.answer(f"✅ فایل {file_id} غیرفعال شد.")
     else:
         await message.answer("❌ فایل پیدا نشد.")
+
+
+@router.callback_query(F.data.startswith("filetoggle:"))
+async def file_toggle_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    file_id = int(call.data.split(":", 1)[1])
+    item = await crud.get_file(file_id)
+    if not item:
+        await call.answer("فایل پیدا نشد.", show_alert=True)
+        return
+
+    new_status = not bool(item.is_active)
+    ok = await crud.set_file_active(file_id, new_status)
+    if not ok:
+        await call.answer("خطا در تغییر وضعیت.", show_alert=True)
+        return
+
+    item = await crud.get_file(file_id)
+    me = await call.bot.get_me()
+    status = "✅ فعال" if item.is_active else "❌ غیرفعال"
+    link = f"https://t.me/{me.username}?start=f_{item.id}"
+    text = (
+        f"🎬 <b>فایل #{item.id}</b>\n\n"
+        f"وضعیت: {status}\n"
+        f"عنوان: <b>{item.title}</b>\n"
+        f"نوع: <code>{getattr(item, 'file_type', None) or 'old'}</code>\n"
+        f"بازدید: <code>{item.views}</code>\n\n"
+        f"لینک مخصوص:\n<code>{link}</code>"
+    )
+    await call.message.edit_text(text, reply_markup=file_manage_kb(item.id, bool(item.is_active)))
+    await call.answer("✅ وضعیت فایل تغییر کرد.")
+
+
+@router.callback_query(F.data.startswith("filedelete:"))
+async def file_delete_confirm_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    file_id = int(call.data.split(":", 1)[1])
+    item = await crud.get_file(file_id)
+    if not item:
+        await call.answer("فایل پیدا نشد.", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"filedelete_yes:{file_id}"),
+                InlineKeyboardButton(text="❌ لغو", callback_data=f"filedelete_no:{file_id}"),
+            ]
+        ]
+    )
+    await call.message.answer(
+        f"⚠️ مطمئنی فایل #{file_id} حذف کامل شود؟\n\n"
+        f"عنوان: <b>{item.title}</b>\n\n"
+        "بعد از حذف، لینک این فایل دیگر کار نمی‌کند.",
+        reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filedelete_no:"))
+async def file_delete_cancel_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    await call.message.edit_text("❌ حذف فایل لغو شد.")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filedelete_yes:"))
+async def file_delete_yes_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    file_id = int(call.data.split(":", 1)[1])
+    ok = await crud.delete_file(file_id)
+    if ok:
+        await call.message.edit_text(f"🗑 فایل #{file_id} حذف کامل شد.")
+        await call.answer("حذف شد.")
+    else:
+        await call.answer("فایل پیدا نشد.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("fileedit:"))
+async def file_edit_start_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    file_id = int(call.data.split(":", 1)[1])
+    item = await crud.get_file(file_id)
+    if not item:
+        await call.answer("فایل پیدا نشد.", show_alert=True)
+        return
+
+    await state.set_state(EditFileState.title)
+    await state.update_data(file_id=file_id)
+    await call.message.answer(
+        f"✏️ عنوان جدید فایل #{file_id} را بفرست:\n\n"
+        f"عنوان فعلی: <b>{item.title}</b>\n\n"
+        "برای لغو، /cancel بزن."
+    )
+    await call.answer()
+
+
+@router.message(EditFileState.title)
+async def file_edit_save_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    title = (message.text or "").strip()
+    if not title:
+        await message.answer("عنوان معتبر نیست. دوباره بفرست یا /cancel بزن.")
+        return
+
+    data = await state.get_data()
+    file_id = int(data.get("file_id", 0))
+    ok = await crud.update_file_title(file_id, title)
+    await state.clear()
+
+    if not ok:
+        await message.answer("❌ فایل پیدا نشد.", reply_markup=admin_menu())
+        return
+
+    item = await crud.get_file(file_id)
+    await message.answer("✅ عنوان فایل اصلاح شد.", reply_markup=admin_menu())
+    if item:
+        await send_file_card(message, item)
+
+
 
 
 
@@ -916,12 +1097,7 @@ async def add_required_channel_menu_handler(message: Message, state: FSMContext)
     if not is_admin(message.from_user.id):
         return
     await state.clear()
-    await message.answer(
-        "➕ می‌خوای عضویت اجباری برای کدام بخش اضافه شود؟\n\n"
-        "بعد از انتخاب، فقط یوزرنیم کانال را می‌فرستی.\n"
-        "مثال: <code>@YourChannel</code>",
-        reply_markup=add_required_channel_target_kb(),
-    )
+    await send_channel_manager_root(message)
 
 
 @router.callback_query(F.data.startswith("addgate:"))
@@ -1667,7 +1843,9 @@ async def main() -> None:
         BotCommand(command="files", description="لیست فایل‌ها"),
         BotCommand(command="stats", description="آمار ربات"),
         BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
-        BotCommand(command="addchannel", description="باز کردن منوی افزودن کانال اجباری"),
+        BotCommand(command="addchannel", description="باز کردن منوی مدیریت کانال اجباری"),
+        BotCommand(command="cancel", description="لغو عملیات فعلی"),
+        BotCommand(command="version", description="نمایش نسخه فعال"),
     ]
 
     for admin_id in ADMIN_IDS:
@@ -1679,7 +1857,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-file-gate-commands-clean-v7")
+    print("Bot started — movie-bot-v7.2-file-manager-buttons")
     await dp.start_polling(bot)
 
 

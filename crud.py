@@ -1,4 +1,4 @@
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from database import FileItem, RequiredChannel, SectionRequiredChannel, SessionLocal, User
 
@@ -52,12 +52,38 @@ async def get_files(limit: int = 20) -> list[FileItem]:
 
 
 async def disable_file(file_id: int) -> bool:
+    return await set_file_active(file_id, False)
+
+
+async def set_file_active(file_id: int, active: bool) -> bool:
     async with SessionLocal() as session:
         result = await session.execute(select(FileItem).where(FileItem.id == file_id))
         item = result.scalar_one_or_none()
         if item is None:
             return False
-        item.is_active = False
+        item.is_active = bool(active)
+        await session.commit()
+        return True
+
+
+async def update_file_title(file_id: int, title: str) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(select(FileItem).where(FileItem.id == file_id))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        item.title = title.strip()
+        await session.commit()
+        return True
+
+
+async def delete_file(file_id: int) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(select(FileItem).where(FileItem.id == file_id))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        await session.delete(item)
         await session.commit()
         return True
 
