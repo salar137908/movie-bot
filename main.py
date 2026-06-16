@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import re
+import sqlite3
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -17,6 +20,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    FSInputFile,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -28,7 +32,11 @@ from config import (
     ADMIN_IDS,
     ARCHIVE_CHANNEL_ID,
     BOT_TOKEN,
+    DATABASE_URL,
     DELETE_AFTER_SECONDS,
+    AUTO_BACKUP_ENABLED,
+    AUTO_BACKUP_HOURS,
+    AUTO_BACKUP_ON_START,
     REQUIRED_CHANNEL,
     REQUIRED_CHANNEL_LINK,
     SKIP_MEMBERSHIP_FOR_ADMINS,
@@ -38,7 +46,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v7.2-file-manager-buttons"
+BOT_VERSION = "movie-bot-v7.7-direct-buttons-backup"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -46,6 +54,7 @@ ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌
 BTN_ADD_FILE = "➕ ثبت فایل"
 BTN_FILES = "📋 لیست فایل‌ها"
 BTN_STATS = "📊 آمار"
+BTN_BACKUP = "💾 بکاپ دیتابیس"
 BTN_HELP = "📌 راهنما"
 BTN_CHANNELS = "📢 کانال‌های اجباری"
 BTN_SECTION_CHANNELS = "🧩 کانال‌های بخش‌ها"
@@ -55,6 +64,8 @@ BTN_USER_TELEGRAM = "📢 کانال تلگرام"
 BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
+BTN_USER_EARN = "💰 کسب درآمد"
+TEAM_LINK = "https://t.me/NeoSeoTeam"
 
 JOIN_REQUIRED_TEXT = "🔒 برای استفاده از ربات، ابتدا عضو کانال‌های زیر شوید.\n\nبعد از عضویت، به همین ربات برگردید و روی «✅ بررسی عضویت» بزنید 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
@@ -79,7 +90,7 @@ SECTION_BUTTON_TO_KEY: dict[str, str] = {
     BTN_USER_TELEGRAM: "telegram",
     BTN_USER_VPN_PREMIUM: "vpn",
     BTN_USER_ACCOUNTS: "accounts",
-    BTN_USER_CONTACT: "contact",
+    # ارتباط با تیم ما لینک مستقیم دارد و عضویت اجباری جداگانه ندارد.
 }
 
 SECTION_RESULT_TEXTS: dict[str, str] = {
@@ -141,13 +152,34 @@ def is_admin(user_id: int | None) -> bool:
     return bool(user_id and user_id in ADMIN_IDS)
 
 
+
+def team_link_kb(text: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=text, url=TEAM_LINK)]
+        ]
+    )
+
+
+
+def inline_user_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=BTN_USER_TELEGRAM, callback_data="usersec:telegram")],
+            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM, callback_data="usersec:vpn")],
+            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS, callback_data="usersec:accounts")],
+            [InlineKeyboardButton(text=BTN_USER_CONTACT, url=TEAM_LINK)],
+            [InlineKeyboardButton(text=BTN_USER_EARN, url=TEAM_LINK)],
+        ]
+    )
+
+
 def user_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_USER_TELEGRAM)],
             [KeyboardButton(text=BTN_USER_VPN_PREMIUM)],
             [KeyboardButton(text=BTN_USER_ACCOUNTS)],
-            [KeyboardButton(text=BTN_USER_CONTACT)],
         ],
         resize_keyboard=True,
     )
@@ -158,8 +190,10 @@ def admin_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_USER_TELEGRAM), KeyboardButton(text=BTN_USER_VPN_PREMIUM)],
             [KeyboardButton(text=BTN_USER_ACCOUNTS), KeyboardButton(text=BTN_USER_CONTACT)],
+            [KeyboardButton(text=BTN_USER_EARN)],
             [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
-            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_CHANNELS)],
+            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_BACKUP)],
+            [KeyboardButton(text=BTN_CHANNELS)],
             [KeyboardButton(text=BTN_ADD_REQUIRED_CHANNEL)],
             [KeyboardButton(text=BTN_HELP)],
         ],
@@ -645,7 +679,47 @@ async def start_handler(message: Message, command: CommandStart) -> None:
     if is_admin(message.from_user.id):
         await message.answer(ADMIN_WELCOME_TEXT, reply_markup=admin_menu())
     else:
-        await message.answer("سلام 👋\nیکی از گزینه‌های زیر را انتخاب کن:", reply_markup=user_menu())
+        await message.answer("سلام 👋\nیکی از گزینه‌های زیر را انتخاب کن:", reply_markup=inline_user_menu())
+
+
+
+@router.message(F.text == BTN_USER_CONTACT)
+async def contact_team_handler(message: Message) -> None:
+    await message.answer(
+        "☎️ برای ارتباط با تیم ما روی دکمه زیر بزن:",
+        reply_markup=team_link_kb("☎️ ارتباط با تیم ما"),
+    )
+
+
+@router.message(F.text == BTN_USER_EARN)
+async def earn_money_handler(message: Message) -> None:
+    await message.answer(
+        "💰 برای هماهنگی درباره کسب درآمد روی دکمه زیر بزن:",
+        reply_markup=team_link_kb("💰 کسب درآمد"),
+    )
+
+
+
+@router.callback_query(F.data.startswith("usersec:"))
+async def user_section_inline_callback(call: CallbackQuery) -> None:
+    section_key = call.data.split(":", 1)[1]
+    if section_key not in SECTION_TITLES or section_key == "contact":
+        await call.answer("بخش نامعتبر است.", show_alert=True)
+        return
+
+    await crud.save_user(
+        telegram_id=call.from_user.id,
+        username=call.from_user.username,
+        full_name=call.from_user.full_name,
+    )
+
+    if not await is_member(call.bot, call.from_user.id):
+        await call.message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        await call.answer("ابتدا عضویت را تکمیل کن.", show_alert=True)
+        return
+
+    await call.answer()
+    await send_section_flow(call.message, section_key)
 
 
 @router.message(F.text.in_(SECTION_BUTTON_TO_KEY.keys()))
@@ -710,7 +784,7 @@ async def check_join_callback(call: CallbackQuery) -> None:
         if is_admin(call.from_user.id):
             await call.message.answer(ADMIN_WELCOME_TEXT, reply_markup=admin_menu())
         else:
-            await call.message.answer("✅ عضویت تایید شد.\n\nاز منوی زیر انتخاب کن:", reply_markup=user_menu())
+            await call.message.answer("✅ عضویت تایید شد.\n\nاز منوی زیر انتخاب کن:", reply_markup=inline_user_menu())
         return
 
     file_id = extract_file_id_from_payload(payload)
@@ -740,7 +814,7 @@ async def check_join_callback(call: CallbackQuery) -> None:
 @router.message(Command("help"))
 async def help_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
-        await message.answer("سلام 👋\nیکی از گزینه‌های زیر را انتخاب کن:", reply_markup=user_menu())
+        await message.answer("سلام 👋\nیکی از گزینه‌های زیر را انتخاب کن:", reply_markup=inline_user_menu())
         return
     await message.answer(ADMIN_HELP_TEXT)
 
@@ -753,6 +827,66 @@ async def stats_handler(message: Message) -> None:
     users = await crud.count_users()
     files = await crud.count_files()
     await message.answer(f"📊 آمار ربات\n\n👥 کاربران: {users}\n🎬 فایل‌ها: {files}")
+
+
+
+
+def sqlite_db_path_from_url() -> Path:
+    """Extract SQLite database file path from DATABASE_URL."""
+    value = str(DATABASE_URL or "").strip()
+    for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+        if value.startswith(prefix):
+            raw_path = value[len(prefix):]
+            path = Path(raw_path)
+            return path if path.is_absolute() else Path.cwd() / path
+
+    # fallback paths used in local/Railway setups
+    for candidate in (Path("/app/data/bot.db"), Path("bot.db"), Path("./bot.db")):
+        if candidate.exists():
+            return candidate
+    return Path("/app/data/bot.db")
+
+
+async def send_database_backup(message: Message) -> None:
+    db_path = sqlite_db_path_from_url()
+    if not db_path.exists():
+        await message.answer(
+            "❌ فایل دیتابیس پیدا نشد.\n\n"
+            f"مسیر بررسی‌شده:\n<code>{db_path}</code>\n\n"
+            "اگر روی Railway هستی، مقدار DATABASE_URL باید این باشد:\n"
+            "<code>sqlite+aiosqlite:////app/data/bot.db</code>"
+        )
+        return
+
+    backup_name = f"movie_bot_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
+    backup_path = Path("/tmp") / backup_name
+
+    try:
+        source = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        dest = sqlite3.connect(str(backup_path))
+        with dest:
+            source.backup(dest)
+        source.close()
+        dest.close()
+    except Exception as e:
+        await message.answer(f"❌ خطا هنگام ساخت بکاپ:\n<code>{e}</code>")
+        return
+
+    await message.answer_document(
+        FSInputFile(str(backup_path), filename=backup_name),
+        caption=(
+            "💾 بکاپ دیتابیس آماده است.\n\n"
+            "این فایل شامل کانال‌های اجباری، لیست فایل‌ها، وضعیت فایل‌ها و کاربران ذخیره‌شده است.\n"
+            "این فایل را داخل GitHub عمومی آپلود نکن."
+        ),
+    )
+
+    try:
+        backup_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 
 
 @router.message(F.text == BTN_ADD_FILE)
@@ -1799,6 +1933,81 @@ async def unknown_handler(message: Message) -> None:
         await message.answer("از منوی پایین یکی از گزینه‌ها را انتخاب کن 👇", reply_markup=user_menu())
 
 
+
+
+def get_sqlite_db_path() -> str:
+    """Extract SQLite database file path from DATABASE_URL."""
+    raw = str(DATABASE_URL or "").strip()
+    if raw.startswith("sqlite+aiosqlite:////"):
+        return "/" + raw.split("sqlite+aiosqlite:////", 1)[1]
+    if raw.startswith("sqlite+aiosqlite:///"):
+        return raw.split("sqlite+aiosqlite:///", 1)[1]
+    if raw.startswith("sqlite:///"):
+        return raw.split("sqlite:///", 1)[1]
+    return "/app/data/bot.db"
+
+
+async def send_database_backup(bot: Bot, reason: str = "manual") -> None:
+    db_path = get_sqlite_db_path()
+    path = Path(db_path)
+
+    if not path.exists():
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"❌ فایل دیتابیس برای بکاپ پیدا نشد.\n\nPath: <code>{db_path}</code>"
+                )
+            except Exception:
+                pass
+        return
+
+    caption = (
+        "💾 <b>بکاپ دیتابیس movie-bot</b>\n\n"
+        f"نسخه: <code>{BOT_VERSION}</code>\n"
+        f"نوع بکاپ: <code>{reason}</code>\n\n"
+        "این فایل را داخل GitHub عمومی آپلود نکن."
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_document(
+                chat_id=admin_id,
+                document=FSInputFile(str(path), filename="bot_backup.db"),
+                caption=caption,
+            )
+        except Exception as e:
+            logging.warning("auto/manual backup failed for admin %s: %s", admin_id, e)
+
+
+async def auto_backup_loop(bot: Bot) -> None:
+    if not AUTO_BACKUP_ENABLED:
+        logging.info("Auto backup is disabled.")
+        return
+
+    hours = max(1, int(AUTO_BACKUP_HOURS or 24))
+    seconds = hours * 60 * 60
+
+    if AUTO_BACKUP_ON_START:
+        await asyncio.sleep(20)
+        await send_database_backup(bot, reason="startup")
+
+    logging.info("Auto backup enabled: every %s hours", hours)
+
+    while True:
+        await asyncio.sleep(seconds)
+        await send_database_backup(bot, reason=f"auto-every-{hours}h")
+
+
+@router.message(F.text == BTN_BACKUP)
+@router.message(Command("backup"))
+async def backup_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("⏳ در حال آماده‌سازی بکاپ دیتابیس...")
+    await send_database_backup(message.bot, reason="manual")
+
+
 async def main() -> None:
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
@@ -1841,11 +2050,11 @@ async def main() -> None:
         BotCommand(command="help", description="راهنمای ادمین"),
         BotCommand(command="add", description="ثبت فایل جدید"),
         BotCommand(command="files", description="لیست فایل‌ها"),
-        BotCommand(command="stats", description="آمار ربات"),
-        BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
+        BotCommand(command="stats", description="آمار ربات"),        BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
         BotCommand(command="addchannel", description="باز کردن منوی مدیریت کانال اجباری"),
         BotCommand(command="cancel", description="لغو عملیات فعلی"),
         BotCommand(command="version", description="نمایش نسخه فعال"),
+        BotCommand(command="backup", description="دریافت بکاپ دیتابیس"),
     ]
 
     for admin_id in ADMIN_IDS:
@@ -1857,7 +2066,8 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v7.2-file-manager-buttons")
+    print("Bot started — movie-bot-v7.7-direct-buttons-backup")
+    asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
 

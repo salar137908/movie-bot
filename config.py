@@ -32,3 +32,8 @@ DELETE_AFTER_SECONDS = int(os.getenv("DELETE_AFTER_SECONDS", "15"))
 
 # اگر 1 باشد ادمین‌ها بدون عضویت هم فایل می‌گیرند
 SKIP_MEMBERSHIP_FOR_ADMINS = os.getenv("SKIP_MEMBERSHIP_FOR_ADMINS", "1").lower() in {"1", "true", "yes", "on"}
+
+
+AUTO_BACKUP_ENABLED: bool = os.getenv("AUTO_BACKUP_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+AUTO_BACKUP_HOURS: int = int(os.getenv("AUTO_BACKUP_HOURS", "24"))
+AUTO_BACKUP_ON_START: bool = os.getenv("AUTO_BACKUP_ON_START", "0").strip().lower() in {"1", "true", "yes", "on"}
