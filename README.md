@@ -595,3 +595,25 @@ POST_CHANNEL_ID=-1001234567890
 
 بعد از Deploy باید در Railway Logs ببینی:
 `Bot started — movie-bot-v8.1-post-list`
+
+
+## نسخه v8.2 — حفظ لینک داخل متن پست
+
+در نسخه‌های قبلی، متن پست با `parse_mode=None` ارسال می‌شد و اگر ادمین داخل متن یک کلمه را لینک‌دار می‌کرد، لینک داخل کانال از بین می‌رفت.
+
+در این نسخه:
+- لینک‌هایی که ادمین داخل خود Telegram روی متن می‌گذارد حفظ می‌شوند.
+- متن‌های HTML مثل `<a href="https://example.com">سایت ما</a>` پشتیبانی می‌شوند.
+- فرمت ساده Markdown مثل `[سایت ما](https://example.com)` هم به لینک HTML تبدیل می‌شود.
+- ارسال پست به کانال با `ParseMode.HTML` انجام می‌شود.
+
+روش پیشنهادی داخل مرحله «متن پست»:
+
+`<a href="https://example.com">سایت ما را دنبال کنید</a>`
+
+یا:
+
+`[سایت ما را دنبال کنید](https://example.com)`
+
+بعد از Deploy باید در Railway Logs ببینی:
+`Bot started — movie-bot-v8.2-html-links`

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import re
 import sqlite3
@@ -47,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v8.1-post-list"
+BOT_VERSION = "movie-bot-v8.2-html-links"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -1217,6 +1218,42 @@ async def file_edit_save_handler(message: Message, state: FSMContext) -> None:
 
 
 
+
+def extract_html_text_from_message(message: Message) -> str:
+    """متن لینک‌دار تلگرام را حفظ می‌کند."""
+    raw_text = (message.text or message.caption or "").strip()
+    if raw_text == "/skip":
+        return ""
+
+    if message.html_text:
+        return message.html_text.strip()
+    if message.caption_html:
+        return message.caption_html.strip()
+
+    return raw_text
+
+
+def markdown_links_to_html(text: str) -> str:
+    """فرمت ساده [متن](لینک) را به HTML امن تبدیل می‌کند."""
+    value = str(text or "")
+    pattern = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+    def repl(match: re.Match) -> str:
+        label = html.escape(match.group(1), quote=False)
+        url = html.escape(match.group(2), quote=True)
+        return f'<a href="{url}">{label}</a>'
+
+    return pattern.sub(repl, value)
+
+
+def safe_html_preview(value: str, limit: int = 70) -> str:
+    text = re.sub(r"<[^>]+>", "", str(value or ""))
+    text = text.replace("\n", " ").strip()
+    if len(text) > limit:
+        text = text[: limit - 3] + "..."
+    return html.escape(text or "بدون متن", quote=False)
+
+
 # ============================================================
 # لیست پست‌های منتشرشده داخل کانال‌ها
 # ============================================================
@@ -1254,11 +1291,7 @@ async def list_channel_posts_handler(message: Message) -> None:
 
     lines = ["📋 <b>آخرین پست‌های منتشرشده</b>\n"]
     for post in posts:
-        title = (post.post_text or "").replace("\n", " ").strip()
-        if len(title) > 70:
-            title = title[:67] + "..."
-        if not title:
-            title = "بدون متن"
+        title = safe_html_preview(post.post_text or "")
 
         link = build_channel_message_link(post.target_channel, post.message_id)
         link_line = f"🔗 <a href=\"{link}\">مشاهده پست</a>" if link else "🔗 لینک مستقیم قابل ساخت نیست"
@@ -1390,23 +1423,23 @@ async def publish_channel_post(
                     chat_id=target,
                     text=text,
                     reply_markup=reply_markup,
-                    parse_mode=None,
+                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
             elif media_type == "photo":
-                sent = await bot.send_photo(chat_id=target, photo=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+                sent = await bot.send_photo(chat_id=target, photo=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             elif media_type == "video":
-                sent = await bot.send_video(chat_id=target, video=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+                sent = await bot.send_video(chat_id=target, video=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             elif media_type == "animation":
-                sent = await bot.send_animation(chat_id=target, animation=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+                sent = await bot.send_animation(chat_id=target, animation=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             elif media_type == "document":
-                sent = await bot.send_document(chat_id=target, document=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+                sent = await bot.send_document(chat_id=target, document=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             else:
                 sent = await bot.send_message(
                     chat_id=target,
                     text=text,
                     reply_markup=reply_markup,
-                    parse_mode=None,
+                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
             sent_to.append((target, sent.message_id))
@@ -1485,7 +1518,8 @@ async def create_channel_post_text(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
 
-    text = "" if (message.text or "").strip() == "/skip" else (message.text or message.caption or "").strip()
+    text = extract_html_text_from_message(message)
+    text = markdown_links_to_html(text)
     if len(text) > 4090:
         await message.answer("متن خیلی طولانیه. لطفاً کوتاه‌تر بفرست.")
         return
@@ -2547,7 +2581,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v8.1-post-list")
+    print("Bot started — movie-bot-v8.2-html-links")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
