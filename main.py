@@ -33,6 +33,7 @@ from config import (
     ARCHIVE_CHANNEL_ID,
     BOT_TOKEN,
     DATABASE_URL,
+    POST_CHANNEL_ID,
     DELETE_AFTER_SECONDS,
     AUTO_BACKUP_ENABLED,
     AUTO_BACKUP_HOURS,
@@ -46,7 +47,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v7.7-direct-buttons-backup"
+BOT_VERSION = "movie-bot-v8.1-post-list"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -55,6 +56,8 @@ BTN_ADD_FILE = "➕ ثبت فایل"
 BTN_FILES = "📋 لیست فایل‌ها"
 BTN_STATS = "📊 آمار"
 BTN_BACKUP = "💾 بکاپ دیتابیس"
+BTN_CREATE_CHANNEL_POST = "📤 ساخت پست کانال"
+BTN_POSTS = "📋 لیست پست‌های کانال"
 BTN_HELP = "📌 راهنما"
 BTN_CHANNELS = "📢 کانال‌های اجباری"
 BTN_SECTION_CHANNELS = "🧩 کانال‌های بخش‌ها"
@@ -115,6 +118,9 @@ ADMIN_HELP_TEXT = """
 📋 لیست فایل‌ها:
 /files
 
+📤 ساخت پست کانال:
+از دکمه «📤 ساخت پست کانال» یا دستور /post استفاده کن. متن، مدیا، متن دکمه، لینک دکمه و کانال مقصد انتشار را خودت وارد می‌کنی.
+
 📢 مدیریت کانال‌های اجباری:
 از دکمه «📢 کانال‌های اجباری» یا دستور /channels استفاده کن.
 در این بخش می‌توانی کانال‌های عضویت اجباری شروع ربات، فیلترشکن، اکانت‌ها و کانال تلگرام را جدا مدیریت کنی.
@@ -142,6 +148,14 @@ class AddFileState(StatesGroup):
 
 class EditFileState(StatesGroup):
     title = State()
+
+
+class CreateChannelPostState(StatesGroup):
+    text = State()
+    media = State()
+    button_text = State()
+    button_link = State()
+    target_channels = State()
 
 
 class AddSectionChannelState(StatesGroup):
@@ -192,6 +206,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_USER_ACCOUNTS), KeyboardButton(text=BTN_USER_CONTACT)],
             [KeyboardButton(text=BTN_USER_EARN)],
             [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
+            [KeyboardButton(text=BTN_CREATE_CHANNEL_POST), KeyboardButton(text=BTN_POSTS)],
             [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_BACKUP)],
             [KeyboardButton(text=BTN_CHANNELS)],
             [KeyboardButton(text=BTN_ADD_REQUIRED_CHANNEL)],
@@ -1202,6 +1217,470 @@ async def file_edit_save_handler(message: Message, state: FSMContext) -> None:
 
 
 
+# ============================================================
+# لیست پست‌های منتشرشده داخل کانال‌ها
+# ============================================================
+
+def build_channel_message_link(target_channel: str, message_id: int) -> str | None:
+    target = str(target_channel or "").strip()
+    if not target:
+        return None
+
+    if target.startswith("@"):
+        return f"https://t.me/{target.replace('@', '').strip()}/{message_id}"
+
+    # برای کانال‌های خصوصی با آیدی -100، لینک داخلی t.me/c ساخته می‌شود.
+    # این لینک فقط برای کسانی باز می‌شود که عضو همان کانال باشند.
+    if target.startswith("-100") and target[4:].isdigit():
+        return f"https://t.me/c/{target[4:]}/{message_id}"
+
+    # اگر به صورت عددی بدون -100 ذخیره شد
+    if target.isdigit():
+        return f"https://t.me/c/{target}/{message_id}"
+
+    return None
+
+
+@router.message(F.text == BTN_POSTS)
+@router.message(Command("posts"))
+async def list_channel_posts_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    posts = await crud.get_channel_posts(limit=30)
+    if not posts:
+        await message.answer("هنوز پستی از طریق ربات داخل کانال منتشر نشده است.")
+        return
+
+    lines = ["📋 <b>آخرین پست‌های منتشرشده</b>\n"]
+    for post in posts:
+        title = (post.post_text or "").replace("\n", " ").strip()
+        if len(title) > 70:
+            title = title[:67] + "..."
+        if not title:
+            title = "بدون متن"
+
+        link = build_channel_message_link(post.target_channel, post.message_id)
+        link_line = f"🔗 <a href=\"{link}\">مشاهده پست</a>" if link else "🔗 لینک مستقیم قابل ساخت نیست"
+
+        file_line = f"🎬 فایل: <code>{post.file_id}</code>" if post.file_id else "🎬 فایل: —"
+
+        lines.append(
+            f"━━━━━━━━━━━━\n"
+            f"ID: <code>{post.id}</code>\n"
+            f"کانال: <code>{post.target_channel}</code>\n"
+            f"Message ID: <code>{post.message_id}</code>\n"
+            f"{file_line}\n"
+            f"دکمه: <b>{post.button_text or '—'}</b>\n"
+            f"متن: {title}\n"
+            f"{link_line}"
+        )
+
+    await message.answer("\n".join(lines), disable_web_page_preview=True)
+
+
+# ============================================================
+# ساخت پست دکمه‌دار برای کانال اصلی
+# ============================================================
+
+def normalize_post_button_url(raw: str, bot_username: str) -> str | None:
+    value = str(raw or "").strip()
+
+    if not value:
+        return None
+
+    # اگر ادمین فقط آیدی فایل را فرستاد: 12
+    if value.isdigit():
+        return f"https://t.me/{bot_username}?start=f_{value}"
+
+    # اگر ادمین فرستاد f_12 یا /start=f_12
+    if value.startswith("f_") and value[2:].isdigit():
+        return f"https://t.me/{bot_username}?start={value}"
+
+    if value.startswith("/start=f_"):
+        payload = value.split("=", 1)[1]
+        return f"https://t.me/{bot_username}?start={payload}"
+
+    # اگر لینک کامل بود
+    if value.startswith("https://") or value.startswith("http://") or value.startswith("tg://"):
+        return value
+
+    # اگر @username بود، لینک تلگرام بساز
+    if value.startswith("@"):
+        return f"https://t.me/{value.replace('@', '').strip()}"
+
+    # اگر دامنه بدون https فرستاد
+    if "." in value and " " not in value:
+        return "https://" + value
+
+    return None
+
+
+def custom_post_button_kb(button_text: str, button_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=button_text, url=button_url)],
+        ]
+    )
+
+
+def choose_post_file_kb(items) -> InlineKeyboardMarkup:
+    rows = []
+    for item in items:
+        status = "✅" if item.is_active else "❌"
+        title = str(item.title or "بدون عنوان")
+        if len(title) > 32:
+            title = title[:29] + "..."
+        rows.append([InlineKeyboardButton(text=f"{status} #{item.id} — {title}", callback_data=f"postfile:{item.id}")])
+    rows.append([InlineKeyboardButton(text="⏭ بدون انتخاب فایل ثبت‌شده", callback_data="postfile:none")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def parse_target_channels(raw: str) -> list[str]:
+    value = str(raw or "").strip()
+
+    if value == "/default":
+        return [POST_CHANNEL_ID] if POST_CHANNEL_ID else []
+
+    # جدا کردن با خط جدید، فاصله یا کاما
+    parts = re.split(r"[\s,]+", value)
+    channels: list[str] = []
+    for part in parts:
+        ch = part.strip()
+        if not ch:
+            continue
+        # لینک t.me را تبدیل به @username می‌کنیم
+        if ch.startswith("https://t.me/") or ch.startswith("http://t.me/"):
+            name = ch.rstrip("/").split("/")[-1]
+            if name and not name.startswith("+") and name != "c":
+                ch = "@" + name
+        channels.append(ch)
+
+    return channels
+
+
+async def publish_channel_post(
+    bot: Bot,
+    target_channels: list[str],
+    post_text: str,
+    media_type: str | None,
+    media_file_id: str | None,
+    button_text: str,
+    button_url: str,
+) -> tuple[list[tuple[str, int]], list[str]]:
+    if not target_channels:
+        raise RuntimeError("target channel is not set")
+
+    text = (post_text or "").strip()
+    if not text:
+        text = "برای ادامه روی دکمه زیر بزن."
+
+    reply_markup = custom_post_button_kb(button_text, button_url)
+
+    if media_file_id and len(text) > 1000:
+        raise RuntimeError("caption_too_long")
+
+    sent_to: list[tuple[str, int]] = []
+    failed: list[str] = []
+
+    for target in target_channels:
+        try:
+            if not media_file_id:
+                sent = await bot.send_message(
+                    chat_id=target,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                    disable_web_page_preview=True,
+                )
+            elif media_type == "photo":
+                sent = await bot.send_photo(chat_id=target, photo=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+            elif media_type == "video":
+                sent = await bot.send_video(chat_id=target, video=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+            elif media_type == "animation":
+                sent = await bot.send_animation(chat_id=target, animation=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+            elif media_type == "document":
+                sent = await bot.send_document(chat_id=target, document=media_file_id, caption=text, reply_markup=reply_markup, parse_mode=None)
+            else:
+                sent = await bot.send_message(
+                    chat_id=target,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                    disable_web_page_preview=True,
+                )
+            sent_to.append((target, sent.message_id))
+        except Exception as e:
+            failed.append(f"{target} → {e}")
+
+    return sent_to, failed
+
+
+@router.message(F.text == BTN_CREATE_CHANNEL_POST)
+@router.message(Command("post"))
+async def create_channel_post_start(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.clear()
+
+    # اگر POST_CHANNEL_ID تنظیم نشده باشد هم مشکلی نیست؛
+    # در مرحله آخر ادمین کانال مقصد را دستی وارد می‌کند.
+
+    items = await crud.get_files(limit=30)
+    if items:
+        await message.answer(
+            "📤 <b>ساخت پست کانال</b>\n\n"
+            "اگر می‌خواهی لینک دکمه به یکی از فایل‌های ثبت‌شده وصل شود، فایل را انتخاب کن.\n\n"
+            "اگر می‌خواهی بعداً لینک دلخواه بدهی، گزینه «بدون انتخاب فایل ثبت‌شده» را بزن.",
+            reply_markup=choose_post_file_kb(items),
+        )
+    else:
+        await state.set_state(CreateChannelPostState.text)
+        await state.update_data(file_id=None, suggested_link="")
+        await message.answer(
+            "📤 <b>ساخت پست کانال</b>\n\n"
+            "هنوز فایل ثبت‌شده‌ای نداری. مشکلی نیست؛ بعداً لینک دلخواه را می‌گیریم.\n\n"
+            "حالا متن پست کانال را بفرست.\n"
+            "اگر متن نمی‌خوای، /skip بزن.\n"
+            "برای لغو، /cancel بزن."
+        )
+
+
+@router.callback_query(F.data.startswith("postfile:"))
+async def create_channel_post_choose_file(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    selected = call.data.split(":", 1)[1]
+    suggested_link = ""
+
+    if selected == "none":
+        file_id = None
+        file_title = "بدون فایل ثبت‌شده"
+    else:
+        file_id = int(selected)
+        item = await crud.get_file(file_id)
+        if not item:
+            await call.answer("فایل پیدا نشد.", show_alert=True)
+            return
+        me = await call.bot.get_me()
+        suggested_link = f"https://t.me/{me.username}?start=f_{file_id}"
+        file_title = item.title
+
+    await state.set_state(CreateChannelPostState.text)
+    await state.update_data(file_id=file_id, suggested_link=suggested_link)
+    await call.message.answer(
+        f"✅ انتخاب شد: <b>{file_title}</b>\n\n"
+        "حالا متن پست کانال را بفرست.\n\n"
+        "اگر متن نمی‌خوای، /skip بزن.\n"
+        "برای لغو، /cancel بزن."
+    )
+    await call.answer()
+
+
+@router.message(CreateChannelPostState.text)
+async def create_channel_post_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    text = "" if (message.text or "").strip() == "/skip" else (message.text or message.caption or "").strip()
+    if len(text) > 4090:
+        await message.answer("متن خیلی طولانیه. لطفاً کوتاه‌تر بفرست.")
+        return
+
+    await state.update_data(post_text=text)
+    await state.set_state(CreateChannelPostState.media)
+    await message.answer(
+        "حالا عکس، ویدیو، گیف یا فایل پست را بفرست.\n\n"
+        "اگر پست فقط متنی باشد، /skip بزن.\n"
+        "برای لغو، /cancel بزن."
+    )
+
+
+@router.message(CreateChannelPostState.media)
+async def create_channel_post_media(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    media_type: str | None = None
+    media_file_id: str | None = None
+
+    if (message.text or "").strip() != "/skip":
+        media_type, media_file_id = get_telegram_file_info(message)
+        if not media_file_id:
+            await message.answer(
+                "نوع مدیا را تشخیص ندادم.\n\n"
+                "یک عکس، ویدیو، گیف یا فایل بفرست؛ یا برای پست متنی /skip بزن."
+            )
+            return
+
+    await state.update_data(media_type=media_type, media_file_id=media_file_id)
+    await state.set_state(CreateChannelPostState.button_text)
+    await message.answer(
+        "حالا متن دکمه شیشه‌ای را بفرست.\n\n"
+        "مثال:\n"
+        "<code>🎬 دریافت فایل</code>\n\n"
+        "اگر همین متن پیش‌فرض را می‌خوای، /skip بزن."
+    )
+
+
+@router.message(CreateChannelPostState.button_text)
+async def create_channel_post_button_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    raw = (message.text or "").strip()
+    button_text = "🎬 دریافت فایل" if raw == "/skip" or not raw else raw
+
+    if len(button_text) > 60:
+        await message.answer("متن دکمه خیلی طولانیه. کوتاه‌تر بفرست.")
+        return
+
+    data = await state.get_data()
+    suggested_link = data.get("suggested_link", "")
+
+    await state.update_data(button_text=button_text)
+    await state.set_state(CreateChannelPostState.button_link)
+
+    if suggested_link:
+        await message.answer(
+            "حالا لینک دکمه را بفرست.\n\n"
+            "چون اول فایل ثبت‌شده انتخاب کردی، اگر می‌خوای همین لینک فایل استفاده شود، /skip بزن.\n\n"
+            f"لینک پیشنهادی:\n<code>{suggested_link}</code>\n\n"
+            "همچنین می‌تونی لینک دلخواه بفرستی."
+        )
+    else:
+        await message.answer(
+            "حالا لینک دکمه را بفرست.\n\n"
+            "مثال لینک مستقیم:\n"
+            "<code>https://t.me/NeoSeoTeam</code>\n\n"
+            "یا اگر می‌خوای به فایل ثبت‌شده وصل شود، فقط آیدی فایل را بفرست. مثلا:\n"
+            "<code>12</code>"
+        )
+
+
+@router.message(CreateChannelPostState.button_link)
+async def create_channel_post_button_link(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    raw_link = (message.text or "").strip()
+
+    if raw_link == "/skip" and data.get("suggested_link"):
+        button_url = data["suggested_link"]
+    else:
+        me = await message.bot.get_me()
+        button_url = normalize_post_button_url(raw_link, me.username)
+
+    if not button_url:
+        await message.answer(
+            "لینک معتبر نیست.\n\n"
+            "لینک کامل بفرست، مثلا:\n"
+            "<code>https://t.me/NeoSeoTeam</code>\n\n"
+            "یا آیدی فایل ثبت‌شده را بفرست، مثلا:\n"
+            "<code>12</code>"
+        )
+        return
+
+    await state.update_data(button_url=button_url)
+    await state.set_state(CreateChannelPostState.target_channels)
+
+    default_text = ""
+    if POST_CHANNEL_ID:
+        default_text = (
+            "\n\nاگر می‌خوای به کانال پیش‌فرض Railway ارسال شود، /default بزن.\n"
+            f"کانال پیش‌فرض: <code>{POST_CHANNEL_ID}</code>"
+        )
+
+    await message.answer(
+        "حالا کانال مقصد انتشار پست را بفرست.\n\n"
+        "مثال برای یک کانال:\n"
+        "<code>@YourChannel</code>\n\n"
+        "مثال برای چند کانال:\n"
+        "<code>@Channel1 @Channel2 -1001234567890</code>\n"
+        f"{default_text}\n\n"
+        "نکته: ربات باید داخل همه این کانال‌ها ادمین باشد و اجازه ارسال پست داشته باشد."
+    )
+
+
+@router.message(CreateChannelPostState.target_channels)
+async def create_channel_post_target_channels(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    raw_targets = (message.text or "").strip()
+    target_channels = parse_target_channels(raw_targets)
+
+    if not target_channels:
+        await message.answer(
+            "کانال مقصد معتبر نیست.\n\n"
+            "مثال:\n"
+            "<code>@YourChannel</code>\n\n"
+            "یا اگر POST_CHANNEL_ID در Railway تنظیم شده، /default بزن."
+        )
+        return
+
+    try:
+        sent_to, failed = await publish_channel_post(
+            bot=message.bot,
+            target_channels=target_channels,
+            post_text=data.get("post_text", ""),
+            media_type=data.get("media_type"),
+            media_file_id=data.get("media_file_id"),
+            button_text=data.get("button_text", "🎬 دریافت فایل"),
+            button_url=data.get("button_url", ""),
+        )
+
+        for target, msg_id in sent_to:
+            await crud.add_channel_post(
+                target_channel=target,
+                message_id=msg_id,
+                file_id=data.get("file_id"),
+                post_text=data.get("post_text", ""),
+                button_text=data.get("button_text", "🎬 دریافت فایل"),
+                button_url=data.get("button_url", ""),
+                media_type=data.get("media_type"),
+            )
+    except RuntimeError as e:
+        if str(e) == "caption_too_long":
+            await message.answer(
+                "متن پست برای کپشن عکس/ویدیو طولانی است.\n\n"
+                "متن را کوتاه‌تر کن یا /cancel بزن و دوباره پست متنی بساز."
+            )
+            return
+        await message.answer(f"❌ خطا در ارسال پست:\n<code>{e}</code>")
+        await state.clear()
+        return
+    except Exception as e:
+        await message.answer(
+            "❌ خطا در ارسال پست به کانال.\n\n"
+            "این موارد را چک کن:\n"
+            "1. کانال مقصد درست باشد.\n"
+            "2. ربات داخل کانال ادمین باشد.\n"
+            "3. ربات اجازه ارسال پست داشته باشد.\n"
+            "4. لینک دکمه معتبر باشد.\n\n"
+            f"Error: <code>{e}</code>"
+        )
+        await state.clear()
+        return
+
+    await state.clear()
+
+    msg = "✅ ارسال پست تمام شد.\n\n"
+    if sent_to:
+        msg += "ارسال موفق به:\n" + "\n".join(f"• <code>{target}</code> — پیام <code>{msg_id}</code>" for target, msg_id in sent_to)
+    if failed:
+        msg += "\n\n❌ خطا در این کانال‌ها:\n" + "\n".join(f"• <code>{x}</code>" for x in failed)
+
+    await message.answer(msg, reply_markup=admin_menu())
+
+
+
+
 # دستورهای قدیمی روش قبلی؛ دیگر اجرا نمی‌شوند تا ادمین فقط از پنل جدید استفاده کند.
 @router.message(Command("addsectionchannel"))
 @router.message(Command("delsectionchannel"))
@@ -2055,6 +2534,8 @@ async def main() -> None:
         BotCommand(command="cancel", description="لغو عملیات فعلی"),
         BotCommand(command="version", description="نمایش نسخه فعال"),
         BotCommand(command="backup", description="دریافت بکاپ دیتابیس"),
+        BotCommand(command="post", description="ساخت پست دکمه‌دار کانال"),
+        BotCommand(command="posts", description="لیست پست‌های منتشرشده"),
     ]
 
     for admin_id in ADMIN_IDS:
@@ -2066,7 +2547,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v7.7-direct-buttons-backup")
+    print("Bot started — movie-bot-v8.1-post-list")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 

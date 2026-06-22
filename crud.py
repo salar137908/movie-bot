@@ -1,6 +1,6 @@
 from sqlalchemy import delete, func, select, update
 
-from database import FileItem, RequiredChannel, SectionRequiredChannel, SessionLocal, User
+from database import ChannelPost, FileItem, RequiredChannel, SectionRequiredChannel, SessionLocal, User
 
 
 async def save_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
@@ -107,6 +107,46 @@ async def count_files() -> int:
     async with SessionLocal() as session:
         result = await session.execute(select(func.count(FileItem.id)))
         return int(result.scalar() or 0)
+
+
+async def add_channel_post(
+    target_channel: str,
+    message_id: int,
+    file_id: int | None = None,
+    post_text: str | None = None,
+    button_text: str | None = None,
+    button_url: str | None = None,
+    media_type: str | None = None,
+) -> ChannelPost:
+    async with SessionLocal() as session:
+        item = ChannelPost(
+            target_channel=str(target_channel),
+            message_id=int(message_id),
+            file_id=file_id,
+            post_text=post_text,
+            button_text=button_text,
+            button_url=button_url,
+            media_type=media_type,
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def get_channel_posts(limit: int = 30) -> list[ChannelPost]:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChannelPost).order_by(ChannelPost.id.desc()).limit(limit)
+        )
+        return list(result.scalars().all())
+
+
+async def count_channel_posts() -> int:
+    async with SessionLocal() as session:
+        result = await session.execute(select(func.count(ChannelPost.id)))
+        return int(result.scalar() or 0)
+
 
 
 async def add_required_channel(chat_id: str, link: str | None = None, title: str | None = None) -> RequiredChannel:

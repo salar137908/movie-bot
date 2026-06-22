@@ -37,3 +37,7 @@ SKIP_MEMBERSHIP_FOR_ADMINS = os.getenv("SKIP_MEMBERSHIP_FOR_ADMINS", "1").lower(
 AUTO_BACKUP_ENABLED: bool = os.getenv("AUTO_BACKUP_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 AUTO_BACKUP_HOURS: int = int(os.getenv("AUTO_BACKUP_HOURS", "24"))
 AUTO_BACKUP_ON_START: bool = os.getenv("AUTO_BACKUP_ON_START", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# کانال اصلی برای ارسال پست‌های دکمه‌دار؛ می‌تواند @username یا -100xxxxxxxxxx باشد
+POST_CHANNEL_ID = os.getenv("POST_CHANNEL_ID", "").strip()

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -35,6 +35,20 @@ class FileItem(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+
+class ChannelPost(Base):
+    __tablename__ = "channel_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_channel: Mapped[str] = mapped_column(String(255), index=True)
+    message_id: Mapped[int] = mapped_column(Integer)
+    file_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    post_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    button_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    button_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class RequiredChannel(Base):
     __tablename__ = "required_channels"
