@@ -1,6 +1,6 @@
 from sqlalchemy import delete, func, select, update
 
-from database import ChannelPost, FileItem, RequiredChannel, SectionRequiredChannel, SessionLocal, User
+from database import ChannelPost, FileItem, FileLink, FileLinkRequiredChannel, RequiredChannel, SectionRequiredChannel, SessionLocal, User
 
 
 async def save_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
@@ -107,6 +107,115 @@ async def count_files() -> int:
     async with SessionLocal() as session:
         result = await session.execute(select(func.count(FileItem.id)))
         return int(result.scalar() or 0)
+
+
+async def add_file_link(file_id: int, title: str | None = None) -> FileLink:
+    async with SessionLocal() as session:
+        item = FileLink(file_id=int(file_id), title=title, is_active=True)
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def get_file_link(link_id: int) -> FileLink | None:
+    async with SessionLocal() as session:
+        result = await session.execute(select(FileLink).where(FileLink.id == int(link_id)))
+        return result.scalar_one_or_none()
+
+
+async def get_file_links(file_id: int | None = None, active_only: bool = False, limit: int = 50) -> list[FileLink]:
+    async with SessionLocal() as session:
+        stmt = select(FileLink).order_by(FileLink.id.desc()).limit(limit)
+        if file_id is not None:
+            stmt = select(FileLink).where(FileLink.file_id == int(file_id)).order_by(FileLink.id.desc()).limit(limit)
+        if active_only:
+            stmt = stmt.where(FileLink.is_active.is_(True))
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def set_file_link_active(link_id: int, active: bool) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(select(FileLink).where(FileLink.id == int(link_id)))
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        item.is_active = bool(active)
+        await session.commit()
+        return True
+
+
+async def increment_file_link_views(link_id: int) -> None:
+    async with SessionLocal() as session:
+        result = await session.execute(select(FileLink).where(FileLink.id == int(link_id)))
+        item = result.scalar_one_or_none()
+        if item:
+            item.views = (item.views or 0) + 1
+            await session.commit()
+
+
+async def add_file_link_required_channel(
+    link_id: int,
+    chat_id: str,
+    link: str | None = None,
+    title: str | None = None,
+) -> FileLinkRequiredChannel:
+    async with SessionLocal() as session:
+        item = FileLinkRequiredChannel(
+            link_id=int(link_id),
+            chat_id=str(chat_id),
+            link=link,
+            title=title,
+            is_active=True,
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def get_file_link_required_channels(link_id: int, active_only: bool = True) -> list[FileLinkRequiredChannel]:
+    async with SessionLocal() as session:
+        stmt = (
+            select(FileLinkRequiredChannel)
+            .where(FileLinkRequiredChannel.link_id == int(link_id))
+            .order_by(FileLinkRequiredChannel.id.desc())
+        )
+        if active_only:
+            stmt = stmt.where(FileLinkRequiredChannel.is_active.is_(True))
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def clear_file_link_required_channels(link_id: int) -> None:
+    async with SessionLocal() as session:
+        await session.execute(
+            update(FileLinkRequiredChannel)
+            .where(FileLinkRequiredChannel.link_id == int(link_id))
+            .values(is_active=False)
+        )
+        await session.commit()
+
+
+async def disable_file_link_required_channel(channel_id: int) -> bool:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(FileLinkRequiredChannel).where(FileLinkRequiredChannel.id == int(channel_id))
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        item.is_active = False
+        await session.commit()
+        return True
+
+
+async def count_file_links() -> int:
+    async with SessionLocal() as session:
+        result = await session.execute(select(func.count(FileLink.id)))
+        return int(result.scalar() or 0)
+
 
 
 async def add_channel_post(

@@ -48,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v8.2-html-links"
+BOT_VERSION = "movie-bot-v8.4-missing-only-join"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -69,9 +69,9 @@ BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
 BTN_USER_EARN = "💰 کسب درآمد"
-TEAM_LINK = "https://t.me/Seoteamsupport"
+TEAM_LINK = "https://t.me/NeoSeoTeam"
 
-JOIN_REQUIRED_TEXT = "🔒 برای استفاده از ربات، ابتدا عضو کانال‌های زیر شوید.\n\nبعد از عضویت، به همین ربات برگردید و روی «✅ بررسی عضویت» بزنید 👇"
+JOIN_REQUIRED_TEXT = "🔒 شما هنوز در کانال‌های زیر عضو نشده‌اید.\n\nفقط کانال‌هایی که عضو نیستی نمایش داده می‌شوند.\n\nبعد از عضویت، به ربات برگرد و روی «✅ بررسی عضویت» بزن 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
 BTN_CHECK_JOIN = "✅ بررسی عضویت"
 
@@ -149,6 +149,10 @@ class AddFileState(StatesGroup):
 
 class EditFileState(StatesGroup):
     title = State()
+
+
+class SetFileLinkChannelsState(StatesGroup):
+    channels = State()
 
 
 class CreateChannelPostState(StatesGroup):
@@ -264,7 +268,7 @@ async def send_channel_manager_root(message_or_call) -> None:
         "➕ افزودن کانال جدید\n"
         "✏️ ادیت کانال\n"
         "🗑 حذف کانال\n\n"
-        "• عضویت اجباری شروع ربات: برای /start و لینک فایل\n"
+        "• عضویت اجباری شروع ربات: فقط برای /start معمولی\n"
         "• فیلترشکن پرمیوم رایگان: فقط برای همان گزینه\n"
         "• اکانت‌های پولی: فقط برای همان گزینه\n"
         "• کانال تلگرام: فقط برای همان گزینه\n\n"
@@ -365,9 +369,45 @@ async def get_join_channels() -> list[dict[str, str]]:
     return []
 
 
-async def join_keyboard(payload: str) -> InlineKeyboardMarkup:
+async def is_joined_channel(bot: Bot, user_id: int, chat_id: str) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in {"creator", "administrator", "member"}
+    except Exception:
+        return False
+
+
+async def get_missing_channels(bot: Bot, user_id: int, channels: list[dict[str, str]]) -> list[dict[str, str]]:
+    """فقط کانال‌هایی را برمی‌گرداند که کاربر هنوز عضو آن‌ها نیست."""
+    if is_admin(user_id) and SKIP_MEMBERSHIP_FOR_ADMINS:
+        return []
+
+    missing: list[dict[str, str]] = []
+    for ch in channels:
+        if not await is_joined_channel(bot, user_id, ch["chat_id"]):
+            missing.append(ch)
+    return missing
+
+
+def missing_join_text(base_text: str, missing_channels: list[dict[str, str]] | None = None) -> str:
+    text = base_text
+    if missing_channels:
+        if len(missing_channels) == 1:
+            text += "\n\nشما هنوز در این کانال عضو نشده‌اید:"
+        else:
+            text += "\n\nشما هنوز در این کانال‌ها عضو نشده‌اید:"
+        for ch in missing_channels:
+            title = html.escape(str(ch.get("title") or ch.get("chat_id") or "کانال"), quote=False)
+            text += f"\n• <b>{title}</b>"
+    return text
+
+
+async def join_keyboard(payload: str, bot: Bot | None = None, user_id: int | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     channels = await get_join_channels()
+
+    if bot is not None and user_id is not None:
+        channels = await get_missing_channels(bot, user_id, channels)
 
     for ch in channels:
         if ch.get("link"):
@@ -377,6 +417,100 @@ async def join_keyboard(payload: str) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"check:{payload}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
+
+
+def extract_file_link_id_from_payload(payload: str | None) -> int | None:
+    if not payload:
+        return None
+    match = re.fullmatch(r"l_(\d+)", payload.strip())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+async def get_file_link_join_channels(link_id: int) -> list[dict[str, str]]:
+    db_channels = await crud.get_file_link_required_channels(link_id=link_id, active_only=True)
+    return [
+        {
+            "chat_id": str(ch.chat_id),
+            "title": ch.title or str(ch.chat_id),
+            "link": ch.link or "",
+            "id": str(ch.id),
+            "link_id": str(ch.link_id),
+        }
+        for ch in db_channels
+    ]
+
+
+async def file_link_join_keyboard(link_id: int, bot: Bot | None = None, user_id: int | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    channels = await get_file_link_join_channels(link_id)
+
+    if bot is not None and user_id is not None:
+        channels = await get_missing_channels(bot, user_id, channels)
+
+    for ch in channels:
+        if ch.get("link"):
+            title = ch.get("title") or "کانال"
+            rows.append([InlineKeyboardButton(text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
+
+    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"link_check:{link_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def is_file_link_member(bot: Bot, user_id: int, link_id: int) -> bool:
+    channels = await get_file_link_join_channels(link_id)
+    if not channels:
+        return True
+    missing = await get_missing_channels(bot, user_id, channels)
+    return len(missing) == 0
+
+
+
+def file_link_join_text(link_id: int, missing_channels: list[dict[str, str]] | None = None) -> str:
+    base = (
+        f"🔒 برای دریافت این فایل، عضویت کانال‌های مخصوص همین لینک بررسی می‌شود.\n\n"
+        f"Link ID: <code>{link_id}</code>\n\n"
+        "فقط کانال‌هایی که عضو نیستی نمایش داده می‌شوند.\n"
+        "بعد از عضویت، روی «✅ بررسی عضویت» بزن 👇"
+    )
+    return missing_join_text(base, missing_channels)
+
+
+async def file_link_url(bot: Bot, link_id: int) -> str:
+    me = await bot.get_me()
+    return f"https://t.me/{me.username}?start=l_{link_id}"
+
+
+def file_link_manage_kb(link_id: int, file_id: int | None = None, is_active: bool = True) -> InlineKeyboardMarkup:
+    toggle_text = "⛔️ غیرفعال کردن لینک" if is_active else "✅ فعال کردن لینک"
+    rows = [
+        [InlineKeyboardButton(text="📢 تنظیم کانال‌های همین لینک", callback_data=f"setlinkch:{link_id}")],
+        [
+            InlineKeyboardButton(text=toggle_text, callback_data=f"linktoggle:{link_id}"),
+            InlineKeyboardButton(text="📋 کانال‌های لینک", callback_data=f"linkchannels:{link_id}"),
+        ],
+    ]
+    if file_id:
+        rows.append([InlineKeyboardButton(text="➕ ساخت لینک جدید برای همین فایل", callback_data=f"newlink:{file_id}")])
+        rows.append([InlineKeyboardButton(text="🔗 همه لینک‌های این فایل", callback_data=f"filelinks:{file_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def parse_channel_lines(raw: str) -> list[tuple[str, str | None]]:
+    lines = [ln.strip() for ln in str(raw or "").splitlines() if ln.strip()]
+    if len(lines) == 1 and "," in lines[0]:
+        lines = [ln.strip() for ln in lines[0].split(",") if ln.strip()]
+
+    result: list[tuple[str, str | None]] = []
+    for line in lines:
+        parts = line.split(maxsplit=1)
+        chat_id = parts[0].strip()
+        link = parts[1].strip() if len(parts) > 1 else None
+        if chat_id:
+            result.append((chat_id, link))
+    return result
 
 
 async def get_section_join_channels(section_key: str) -> list[dict[str, str]]:
@@ -393,9 +527,12 @@ async def get_section_join_channels(section_key: str) -> list[dict[str, str]]:
     ]
 
 
-async def section_join_keyboard(section_key: str) -> InlineKeyboardMarkup:
+async def section_join_keyboard(section_key: str, bot: Bot | None = None, user_id: int | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     channels = await get_section_join_channels(section_key)
+
+    if bot is not None and user_id is not None:
+        channels = await get_missing_channels(bot, user_id, channels)
 
     for ch in channels:
         if ch.get("link"):
@@ -407,30 +544,22 @@ async def section_join_keyboard(section_key: str) -> InlineKeyboardMarkup:
 
 
 async def is_section_member(bot: Bot, user_id: int, section_key: str) -> bool:
-    if is_admin(user_id) and SKIP_MEMBERSHIP_FOR_ADMINS:
-        return True
-
     channels = await get_section_join_channels(section_key)
     if not channels:
         return False
-
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch["chat_id"], user_id)
-            if member.status not in {"creator", "administrator", "member"}:
-                return False
-        except Exception:
-            return False
-
-    return True
+    missing = await get_missing_channels(bot, user_id, channels)
+    return len(missing) == 0
 
 
-def section_join_text(section_key: str) -> str:
+
+def section_join_text(section_key: str, missing_channels: list[dict[str, str]] | None = None) -> str:
     title = SECTION_TITLES.get(section_key, "این بخش")
-    return (
-        f"🔒 برای استفاده از بخش «{title}» باید عضو کانال‌های همین بخش شوی.\n\n"
-        "بعد از عضویت، به ربات برگرد و روی «✅ بررسی عضویت» بزن 👇"
+    base = (
+        f"🔒 برای استفاده از بخش «{title}»، عضویت کانال‌های همین بخش بررسی می‌شود.\n\n"
+        "فقط کانال‌هایی که عضو نیستی نمایش داده می‌شوند.\n"
+        "بعد از عضویت، روی «✅ بررسی عضویت» بزن 👇"
     )
+    return missing_join_text(base, missing_channels)
 
 
 async def send_section_flow(message: Message, section_key: str) -> None:
@@ -455,7 +584,8 @@ async def send_section_flow(message: Message, section_key: str) -> None:
         return
 
     if not await is_section_member(message.bot, message.from_user.id, section_key):
-        await message.answer(section_join_text(section_key), reply_markup=await section_join_keyboard(section_key))
+        missing = await get_missing_channels(message.bot, message.from_user.id, channels)
+        await message.answer(section_join_text(section_key, missing), reply_markup=await section_join_keyboard(section_key, message.bot, message.from_user.id))
         return
 
     await message.answer(
@@ -474,22 +604,11 @@ def extract_file_id_from_payload(payload: str | None) -> int | None:
 
 
 async def is_member(bot: Bot, user_id: int) -> bool:
-    if is_admin(user_id) and SKIP_MEMBERSHIP_FOR_ADMINS:
-        return True
-
     channels = await get_join_channels()
     if not channels:
         return True
-
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch["chat_id"], user_id)
-            if member.status not in {"creator", "administrator", "member"}:
-                return False
-        except Exception:
-            return False
-
-    return True
+    missing = await get_missing_channels(bot, user_id, channels)
+    return len(missing) == 0
 
 
 async def notify_admins(bot: Bot, text: str) -> None:
@@ -643,16 +762,33 @@ async def send_file_to_user(bot: Bot, chat_id: int, file_id: int) -> None:
     )
 
 async def handle_file_request(message: Message, payload: str) -> None:
+    link_id = extract_file_link_id_from_payload(payload)
+    if link_id is not None:
+        link_item = await crud.get_file_link(link_id)
+        if link_item is None or not link_item.is_active:
+            await message.answer(FILE_NOT_FOUND_TEXT)
+            return
+
+        channels = await get_file_link_join_channels(link_id)
+        if channels and not await is_file_link_member(message.bot, message.from_user.id, link_id):
+            missing = await get_missing_channels(message.bot, message.from_user.id, channels)
+            await message.answer(file_link_join_text(link_id, missing), reply_markup=await file_link_join_keyboard(link_id, message.bot, message.from_user.id))
+            return
+
+        await crud.increment_file_link_views(link_id)
+        await send_file_to_user(message.bot, message.chat.id, int(link_item.file_id))
+        return
+
     file_id = extract_file_id_from_payload(payload)
     if file_id is None:
         await message.answer(WELCOME_TEXT)
         return
 
-    # نسخه v6:
-    # لینک فایل هم از همان عضویت اجباری عمومی داخل دیتابیس استفاده می‌کند.
-    # دیگر به REQUIRED_CHANNEL_LINK داخل Railway وابسته نیست.
+    # لینک‌های قدیمی f_ برای سازگاری قبلی همان گیت عمومی را چک می‌کنند.
+    # لینک‌های جدید l_ فقط کانال‌های مخصوص همان لینک را چک می‌کنند.
     if not await is_member(message.bot, message.from_user.id):
-        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard(payload))
+        missing = await get_missing_channels(message.bot, message.from_user.id, await get_join_channels())
+        await message.answer(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard(payload, message.bot, message.from_user.id))
         return
 
     await send_file_to_user(message.bot, message.chat.id, file_id)
@@ -689,7 +825,8 @@ async def start_handler(message: Message, command: CommandStart) -> None:
 
     # عضویت اجباری عمومی: کاربر اول عضو کانال‌های اصلی می‌شود، بعد منوی کاربر را می‌بیند.
     if not await is_member(message.bot, message.from_user.id):
-        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        missing = await get_missing_channels(message.bot, message.from_user.id, await get_join_channels())
+        await message.answer(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard("menu", message.bot, message.from_user.id))
         return
 
     if is_admin(message.from_user.id):
@@ -730,7 +867,8 @@ async def user_section_inline_callback(call: CallbackQuery) -> None:
     )
 
     if not await is_member(call.bot, call.from_user.id):
-        await call.message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        missing = await get_missing_channels(call.bot, call.from_user.id, await get_join_channels())
+        await call.message.answer(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard("menu", call.bot, call.from_user.id))
         await call.answer("ابتدا عضویت را تکمیل کن.", show_alert=True)
         return
 
@@ -748,7 +886,8 @@ async def user_section_button_handler(message: Message) -> None:
 
     # اگر کاربر از قبل منو را دیده اما هنوز عضو کانال‌های اصلی نیست، دوباره گیت عمومی را نشان بده.
     if not await is_member(message.bot, message.from_user.id):
-        await message.answer(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+        missing = await get_missing_channels(message.bot, message.from_user.id, await get_join_channels())
+        await message.answer(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard("menu", message.bot, message.from_user.id))
         return
 
     section_key = SECTION_BUTTON_TO_KEY.get(message.text or "")
@@ -766,7 +905,8 @@ async def section_check_callback(call: CallbackQuery) -> None:
     if not await is_section_member(call.bot, call.from_user.id, section_key):
         await call.answer("هنوز عضویت شما در همه کانال‌های این بخش تایید نشده است.", show_alert=True)
         try:
-            await call.message.edit_text(section_join_text(section_key), reply_markup=await section_join_keyboard(section_key))
+            missing = await get_missing_channels(call.bot, call.from_user.id, await get_section_join_channels(section_key))
+            await call.message.edit_text(section_join_text(section_key, missing), reply_markup=await section_join_keyboard(section_key, call.bot, call.from_user.id))
         except Exception:
             pass
         return
@@ -778,6 +918,39 @@ async def section_check_callback(call: CallbackQuery) -> None:
         await call.message.answer(SECTION_RESULT_TEXTS.get(section_key, "✅ عضویت تایید شد."))
 
 
+
+@router.callback_query(F.data.startswith("link_check:"))
+async def file_link_check_callback(call: CallbackQuery) -> None:
+    try:
+        link_id = int(call.data.split(":", 1)[1])
+    except Exception:
+        await call.answer("لینک نامعتبر است.", show_alert=True)
+        return
+
+    link_item = await crud.get_file_link(link_id)
+    if link_item is None or not link_item.is_active:
+        await call.answer("این لینک پیدا نشد یا غیرفعال شده است.", show_alert=True)
+        return
+
+    if not await is_file_link_member(call.bot, call.from_user.id, link_id):
+        await call.answer("هنوز عضویت شما در همه کانال‌های این لینک تایید نشده است.", show_alert=True)
+        try:
+            missing = await get_missing_channels(call.bot, call.from_user.id, await get_file_link_join_channels(link_id))
+            await call.message.edit_text(file_link_join_text(link_id, missing), reply_markup=await file_link_join_keyboard(link_id, call.bot, call.from_user.id))
+        except Exception:
+            pass
+        return
+
+    await call.answer("عضویت تایید شد ✅")
+    try:
+        await call.message.edit_text("✅ عضویت تایید شد. فایل در حال ارسال است...")
+    except Exception:
+        pass
+
+    await crud.increment_file_link_views(link_id)
+    await send_file_to_user(call.bot, call.message.chat.id, int(link_item.file_id))
+
+
 @router.callback_query(F.data.startswith("check:"))
 async def check_join_callback(call: CallbackQuery) -> None:
     payload = call.data.split(":", 1)[1]
@@ -787,7 +960,8 @@ async def check_join_callback(call: CallbackQuery) -> None:
         if not await is_member(call.bot, call.from_user.id):
             await call.answer("هنوز عضویت شما تایید نشده است.", show_alert=True)
             try:
-                await call.message.edit_text(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard("menu"))
+                missing = await get_missing_channels(call.bot, call.from_user.id, await get_join_channels())
+                await call.message.edit_text(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard("menu", call.bot, call.from_user.id))
             except Exception:
                 pass
             return
@@ -812,7 +986,8 @@ async def check_join_callback(call: CallbackQuery) -> None:
         await call.answer("هنوز عضویت شما تایید نشده است.", show_alert=True)
         # دکمه‌ها را نگه می‌داریم تا کاربر بعد از عضویت دوباره بررسی کند.
         try:
-            await call.message.edit_text(JOIN_REQUIRED_TEXT, reply_markup=await join_keyboard(payload))
+            missing = await get_missing_channels(call.bot, call.from_user.id, await get_join_channels())
+            await call.message.edit_text(missing_join_text(JOIN_REQUIRED_TEXT, missing), reply_markup=await join_keyboard(payload, call.bot, call.from_user.id))
         except Exception:
             pass
         return
@@ -842,7 +1017,8 @@ async def stats_handler(message: Message) -> None:
         return
     users = await crud.count_users()
     files = await crud.count_files()
-    await message.answer(f"📊 آمار ربات\n\n👥 کاربران: {users}\n🎬 فایل‌ها: {files}")
+    file_links = await crud.count_file_links()
+    await message.answer(f"📊 آمار ربات\n\n👥 کاربران: {users}\n🎬 فایل‌ها: {files}\n🔗 لینک‌های اختصاصی: {file_links}")
 
 
 
@@ -1008,17 +1184,21 @@ async def add_file_forwarded(message: Message, state: FSMContext) -> None:
         telegram_file_id=telegram_file_id,
         file_type=file_type,
     )
+    link_item = await crud.add_file_link(file_id=item.id, title=item.title)
     await state.clear()
 
-    me = await message.bot.get_me()
-    link = f"https://t.me/{me.username}?start=f_{item.id}"
+    link = await file_link_url(message.bot, link_item.id)
+    old_link = f"https://t.me/{(await message.bot.get_me()).username}?start=f_{item.id}"
     await message.answer(
-        "✅ فایل ثبت شد.\n\n"
+        "✅ فایل ثبت شد و یک لینک اختصاصی برای آن ساخته شد.\n\n"
         f"عنوان: <b>{item.title}</b>\n"
         f"نوع فایل: <code>{item.file_type}</code>\n"
-        f"ID: <code>{item.id}</code>\n\n"
-        f"لینک مخصوص:\n<code>{link}</code>\n\n"
-        "این لینک را روی دکمه پست کانال اصلی بگذار."
+        f"File ID: <code>{item.id}</code>\n"
+        f"Link ID: <code>{link_item.id}</code>\n\n"
+        f"لینک جدید با کانال‌های اختصاصی:\n<code>{link}</code>\n\n"
+        f"لینک قدیمی سازگار با گیت عمومی:\n<code>{old_link}</code>\n\n"
+        "حالا برای همین لینک، کانال‌های اجباری جدا تنظیم کن.",
+        reply_markup=file_link_manage_kb(link_item.id, file_id=item.id, is_active=True),
     )
 
 
@@ -1032,6 +1212,10 @@ def file_manage_kb(file_id: int, is_active: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=toggle_text, callback_data=f"filetoggle:{file_id}"),
             ],
             [
+                InlineKeyboardButton(text="🔗 لینک‌های این فایل", callback_data=f"filelinks:{file_id}"),
+                InlineKeyboardButton(text="➕ لینک جدید", callback_data=f"newlink:{file_id}"),
+            ],
+            [
                 InlineKeyboardButton(text="🗑 حذف کامل", callback_data=f"filedelete:{file_id}"),
             ],
         ]
@@ -1042,14 +1226,17 @@ async def send_file_card(message: Message, item, bot: Bot | None = None) -> None
     bot = bot or message.bot
     me = await bot.get_me()
     status = "✅ فعال" if item.is_active else "❌ غیرفعال"
-    link = f"https://t.me/{me.username}?start=f_{item.id}"
+    old_link = f"https://t.me/{me.username}?start=f_{item.id}"
+    links = await crud.get_file_links(file_id=item.id, active_only=True, limit=1)
+    main_link = f"https://t.me/{me.username}?start=l_{links[0].id}" if links else old_link
     text = (
         f"🎬 <b>فایل #{item.id}</b>\n\n"
         f"وضعیت: {status}\n"
         f"عنوان: <b>{item.title}</b>\n"
         f"نوع: <code>{getattr(item, 'file_type', None) or 'old'}</code>\n"
         f"بازدید: <code>{item.views}</code>\n\n"
-        f"لینک مخصوص:\n<code>{link}</code>"
+        f"لینک اختصاصی جدید:\n<code>{main_link}</code>\n\n"
+        f"لینک قدیمی:\n<code>{old_link}</code>"
     )
     await message.answer(text, reply_markup=file_manage_kb(item.id, bool(item.is_active)))
 
@@ -1067,6 +1254,249 @@ async def files_handler(message: Message) -> None:
     await message.answer("📋 <b>لیست فایل‌ها</b>\n\nبرای هر فایل می‌تونی ادیت، غیرفعال یا حذف کامل بزنی.")
     for item in items:
         await send_file_card(message, item)
+
+
+
+async def send_file_links_list(message_or_call, file_id: int) -> None:
+    item = await crud.get_file(file_id)
+    if not item:
+        text = "❌ فایل پیدا نشد."
+        if isinstance(message_or_call, CallbackQuery):
+            await message_or_call.answer(text, show_alert=True)
+        else:
+            await message_or_call.answer(text)
+        return
+
+    links = await crud.get_file_links(file_id=file_id, active_only=False, limit=50)
+    me = await (message_or_call.bot.get_me() if isinstance(message_or_call, Message) else message_or_call.bot.get_me())
+
+    lines = [f"🔗 <b>لینک‌های فایل #{file_id}</b>\nعنوان: <b>{item.title}</b>\n"]
+    if not links:
+        lines.append("هنوز برای این فایل لینک اختصاصی ساخته نشده است.")
+    else:
+        for ln in links:
+            status = "✅ فعال" if ln.is_active else "❌ غیرفعال"
+            url = f"https://t.me/{me.username}?start=l_{ln.id}"
+            channels = await crud.get_file_link_required_channels(ln.id, active_only=True)
+            lines.append(
+                f"━━━━━━━━━━━━\n"
+                f"{status}\n"
+                f"Link ID: <code>{ln.id}</code>\n"
+                f"بازدید لینک: <code>{ln.views}</code>\n"
+                f"کانال‌های اجباری: <code>{len(channels)}</code>\n"
+                f"<code>{url}</code>"
+            )
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ ساخت لینک جدید", callback_data=f"newlink:{file_id}")],
+            *[
+                [InlineKeyboardButton(text=f"📢 مدیریت لینک #{ln.id}", callback_data=f"linkchannels:{ln.id}")]
+                for ln in links[:20]
+            ],
+        ]
+    )
+
+    if isinstance(message_or_call, CallbackQuery):
+        await message_or_call.message.answer("\n".join(lines), reply_markup=kb)
+        await message_or_call.answer()
+    else:
+        await message_or_call.answer("\n".join(lines), reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("filelinks:"))
+async def file_links_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    file_id = int(call.data.split(":", 1)[1])
+    await send_file_links_list(call, file_id)
+
+
+@router.callback_query(F.data.startswith("newlink:"))
+async def new_file_link_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    file_id = int(call.data.split(":", 1)[1])
+    item = await crud.get_file(file_id)
+    if not item:
+        await call.answer("فایل پیدا نشد.", show_alert=True)
+        return
+
+    link_item = await crud.add_file_link(file_id=file_id, title=item.title)
+    url = await file_link_url(call.bot, link_item.id)
+    await call.message.answer(
+        "✅ لینک جدید ساخته شد.\n\n"
+        f"File ID: <code>{file_id}</code>\n"
+        f"Link ID: <code>{link_item.id}</code>\n\n"
+        f"<code>{url}</code>\n\n"
+        "حالا کانال‌های اجباری همین لینک را تنظیم کن.",
+        reply_markup=file_link_manage_kb(link_item.id, file_id=file_id, is_active=True),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("linktoggle:"))
+async def file_link_toggle_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    link_id = int(call.data.split(":", 1)[1])
+    link_item = await crud.get_file_link(link_id)
+    if not link_item:
+        await call.answer("لینک پیدا نشد.", show_alert=True)
+        return
+
+    ok = await crud.set_file_link_active(link_id, not bool(link_item.is_active))
+    if not ok:
+        await call.answer("خطا در تغییر وضعیت لینک.", show_alert=True)
+        return
+    link_item = await crud.get_file_link(link_id)
+    url = await file_link_url(call.bot, link_id)
+    channels = await crud.get_file_link_required_channels(link_id, active_only=True)
+    status = "✅ فعال" if link_item.is_active else "❌ غیرفعال"
+    await call.message.answer(
+        f"🔗 لینک #{link_id}\n\n"
+        f"وضعیت: {status}\n"
+        f"File ID: <code>{link_item.file_id}</code>\n"
+        f"کانال‌های اجباری فعال: <code>{len(channels)}</code>\n\n"
+        f"<code>{url}</code>",
+        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+    )
+    await call.answer("✅ وضعیت لینک تغییر کرد.")
+
+
+@router.callback_query(F.data.startswith("linkchannels:"))
+async def file_link_channels_callback(call: CallbackQuery) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+    link_id = int(call.data.split(":", 1)[1])
+    link_item = await crud.get_file_link(link_id)
+    if not link_item:
+        await call.answer("لینک پیدا نشد.", show_alert=True)
+        return
+
+    channels = await crud.get_file_link_required_channels(link_id, active_only=True)
+    url = await file_link_url(call.bot, link_id)
+    lines = [
+        f"📢 <b>کانال‌های اجباری لینک #{link_id}</b>\n",
+        f"File ID: <code>{link_item.file_id}</code>",
+        f"لینک:\n<code>{url}</code>\n",
+    ]
+    if not channels:
+        lines.append("هنوز کانالی برای این لینک تنظیم نشده است.")
+    else:
+        for ch in channels:
+            lines.append(
+                f"━━━━━━━━━━━━\n"
+                f"Channel ID: <code>{ch.id}</code>\n"
+                f"عنوان: <b>{ch.title or '-'}</b>\n"
+                f"Chat: <code>{ch.chat_id}</code>\n"
+                f"Link: <code>{ch.link or '-'}</code>"
+            )
+
+    await call.message.answer(
+        "\n".join(lines),
+        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("setlinkch:"))
+async def set_file_link_channels_start(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    link_id = int(call.data.split(":", 1)[1])
+    link_item = await crud.get_file_link(link_id)
+    if not link_item:
+        await call.answer("لینک پیدا نشد.", show_alert=True)
+        return
+
+    await state.set_state(SetFileLinkChannelsState.channels)
+    await state.update_data(link_id=link_id)
+    await call.message.answer(
+        f"📢 تنظیم کانال‌های اجباری برای لینک #{link_id}\n\n"
+        "کانال‌ها را هرکدام در یک خط بفرست.\n\n"
+        "کانال عمومی:\n"
+        "<code>@YourChannel</code>\n\n"
+        "کانال خصوصی:\n"
+        "<code>-1001234567890 https://t.me/+InviteLink</code>\n\n"
+        "اگر چند کانال داری، مثل این بفرست:\n"
+        "<code>@channel1\n@channel2\n-1001234567890 https://t.me/+InviteLink</code>\n\n"
+        "با ارسال لیست جدید، کانال‌های قبلی این لینک غیرفعال می‌شوند."
+    )
+    await call.answer()
+
+
+@router.message(SetFileLinkChannelsState.channels)
+async def set_file_link_channels_save(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    link_id = int(data.get("link_id", 0))
+    link_item = await crud.get_file_link(link_id)
+    if not link_item:
+        await message.answer("❌ لینک پیدا نشد.")
+        await state.clear()
+        return
+
+    parsed = parse_channel_lines(message.text or "")
+    if not parsed:
+        await message.answer("❌ هیچ کانالی تشخیص داده نشد. دوباره بفرست.")
+        return
+
+    saved = []
+    errors = []
+
+    await crud.clear_file_link_required_channels(link_id)
+
+    for chat_id, invite_link in parsed:
+        try:
+            chat = await message.bot.get_chat(chat_id)
+            title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+            if not invite_link and getattr(chat, "username", None):
+                invite_link = f"https://t.me/{chat.username}"
+
+            item = await crud.add_file_link_required_channel(
+                link_id=link_id,
+                chat_id=str(chat_id),
+                link=invite_link,
+                title=title,
+            )
+            saved.append(item)
+        except Exception as e:
+            errors.append(f"{chat_id} → {type(e).__name__}: {e}")
+
+    await state.clear()
+
+    url = await file_link_url(message.bot, link_id)
+    lines = [
+        "✅ تنظیم کانال‌های لینک انجام شد.\n",
+        f"Link ID: <code>{link_id}</code>",
+        f"File ID: <code>{link_item.file_id}</code>",
+        f"لینک:\n<code>{url}</code>\n",
+        f"تعداد کانال‌های ذخیره‌شده: <code>{len(saved)}</code>",
+    ]
+    if saved:
+        lines.append("\nکانال‌های ذخیره‌شده:")
+        for item in saved:
+            lines.append(f"• <b>{item.title}</b> — <code>{item.chat_id}</code>")
+    if errors:
+        lines.append("\n❌ خطاها:")
+        for err in errors:
+            lines.append(f"• <code>{err}</code>")
+
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+    )
+
 
 
 @router.message(F.text.regexp(r"^/del\d+$"))
@@ -1102,14 +1532,17 @@ async def file_toggle_callback(call: CallbackQuery) -> None:
     item = await crud.get_file(file_id)
     me = await call.bot.get_me()
     status = "✅ فعال" if item.is_active else "❌ غیرفعال"
-    link = f"https://t.me/{me.username}?start=f_{item.id}"
+    old_link = f"https://t.me/{me.username}?start=f_{item.id}"
+    links = await crud.get_file_links(file_id=item.id, active_only=True, limit=1)
+    main_link = f"https://t.me/{me.username}?start=l_{links[0].id}" if links else old_link
     text = (
         f"🎬 <b>فایل #{item.id}</b>\n\n"
         f"وضعیت: {status}\n"
         f"عنوان: <b>{item.title}</b>\n"
         f"نوع: <code>{getattr(item, 'file_type', None) or 'old'}</code>\n"
         f"بازدید: <code>{item.views}</code>\n\n"
-        f"لینک مخصوص:\n<code>{link}</code>"
+        f"لینک اختصاصی جدید:\n<code>{main_link}</code>\n\n"
+        f"لینک قدیمی:\n<code>{old_link}</code>"
     )
     await call.message.edit_text(text, reply_markup=file_manage_kb(item.id, bool(item.is_active)))
     await call.answer("✅ وضعیت فایل تغییر کرد.")
@@ -1322,11 +1755,19 @@ def normalize_post_button_url(raw: str, bot_username: str) -> str | None:
     if not value:
         return None
 
-    # اگر ادمین فقط آیدی فایل را فرستاد: 12
+    # اگر ادمین فقط عدد فرستاد، برای سازگاری قدیمی آن را File ID فرض می‌کنیم: f_12
     if value.isdigit():
         return f"https://t.me/{bot_username}?start=f_{value}"
 
-    # اگر ادمین فرستاد f_12 یا /start=f_12
+    # لینک جدید اختصاصی: l_101
+    if value.startswith("l_") and value[2:].isdigit():
+        return f"https://t.me/{bot_username}?start={value}"
+
+    if value.startswith("/start=l_"):
+        payload = value.split("=", 1)[1]
+        return f"https://t.me/{bot_username}?start={payload}"
+
+    # لینک قدیمی: f_12
     if value.startswith("f_") and value[2:].isdigit():
         return f"https://t.me/{bot_username}?start={value}"
 
@@ -1499,7 +1940,11 @@ async def create_channel_post_choose_file(call: CallbackQuery, state: FSMContext
             await call.answer("فایل پیدا نشد.", show_alert=True)
             return
         me = await call.bot.get_me()
-        suggested_link = f"https://t.me/{me.username}?start=f_{file_id}"
+        links = await crud.get_file_links(file_id=file_id, active_only=True, limit=1)
+        if links:
+            suggested_link = f"https://t.me/{me.username}?start=l_{links[0].id}"
+        else:
+            suggested_link = f"https://t.me/{me.username}?start=f_{file_id}"
         file_title = item.title
 
     await state.set_state(CreateChannelPostState.text)
@@ -2581,7 +3026,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v8.2-html-links")
+    print("Bot started — movie-bot-v8.4-missing-only-join")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 

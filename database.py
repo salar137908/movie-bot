@@ -37,6 +37,29 @@ class FileItem(Base):
 
 
 
+
+class FileLink(Base):
+    __tablename__ = "file_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    file_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class FileLinkRequiredChannel(Base):
+    __tablename__ = "file_link_required_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    link_id: Mapped[int] = mapped_column(Integer, index=True)
+    chat_id: Mapped[str] = mapped_column(String(120), index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class ChannelPost(Base):
     __tablename__ = "channel_posts"
 
