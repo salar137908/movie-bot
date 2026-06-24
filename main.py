@@ -48,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v8.5-clean-join-text"
+BOT_VERSION = "movie-bot-v8.8-step-button-builder"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -69,7 +69,7 @@ BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
 BTN_USER_EARN = "💰 کسب درآمد"
-TEAM_LINK = "https://t.me/@Seoteamsupport"
+TEAM_LINK = "https://t.me/Seoteamsupport"
 
 JOIN_REQUIRED_TEXT = "🔒 شما هنوز در کانال‌های زیر عضو نشده‌اید.\n\nبعد از عضویت، به ربات برگرد و روی «✅ بررسی عضویت» بزن 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
@@ -119,7 +119,7 @@ ADMIN_HELP_TEXT = """
 /files
 
 📤 ساخت پست کانال:
-از دکمه «📤 ساخت پست کانال» یا دستور /post استفاده کن. متن، مدیا، متن دکمه، لینک دکمه و کانال مقصد انتشار را خودت وارد می‌کنی.
+از دکمه «📤 ساخت پست کانال» یا دستور /post استفاده کن. متن و مدیا را می‌فرستی؛ برای هر دکمه متن و لینک را جدا می‌فرستی، رنگ را با گزینه شیشه‌ای انتخاب می‌کنی و تا ۱۰ دکمه می‌سازی.
 
 📢 مدیریت کانال‌های اجباری:
 از دکمه «📢 کانال‌های اجباری» یا دستور /channels استفاده کن.
@@ -157,8 +157,7 @@ class SetFileLinkChannelsState(StatesGroup):
 class CreateChannelPostState(StatesGroup):
     text = State()
     media = State()
-    button_text = State()
-    button_link = State()
+    buttons = State()
     target_channels = State()
 
 
@@ -1811,12 +1810,122 @@ def normalize_post_button_url(raw: str, bot_username: str) -> str | None:
     return None
 
 
-def custom_post_button_kb(button_text: str, button_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=button_text, url=button_url)],
-        ]
-    )
+def normalize_button_style(raw: str | None) -> str | None:
+    value = str(raw or "").strip().lower()
+
+    if value in {"", "none", "default", "معمولی", "ساده", "خالی", "بدون"}:
+        return None
+
+    if value in {"green", "success", "سبز", "🟢"}:
+        return "success"
+
+    if value in {"red", "danger", "قرمز", "سرخ", "🔴", "خطر"}:
+        return "danger"
+
+    if value in {"blue", "primary", "آبی", "ابی", "🔵"}:
+        return "primary"
+
+    # رنگ‌های آزاد مثل طلایی/بنفش در Bot API رسمی وجود ندارند.
+    return None
+
+
+def make_url_button(text: str, url: str, style: str | None = None, custom_emoji_id: str | None = None) -> InlineKeyboardButton:
+    data: dict[str, Any] = {
+        "text": text,
+        "url": url,
+    }
+
+    if style:
+        data["style"] = style
+
+    if custom_emoji_id:
+        data["icon_custom_emoji_id"] = custom_emoji_id
+
+    try:
+        # aiogram نسخه‌های جدید/قدیمی معمولاً extra_data را می‌پذیرند.
+        return InlineKeyboardButton(**data)
+    except TypeError:
+        # اگر کتابخانه style را نشناخت، دکمه معمولی ساخته می‌شود.
+        return InlineKeyboardButton(text=text, url=url)
+
+
+def custom_post_buttons_kb(buttons: list[dict[str, str]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+
+    for btn in buttons[:10]:
+        text = str(btn.get("text") or "باز کردن لینک")
+        url = str(btn.get("url") or "")
+        style = normalize_button_style(btn.get("style"))
+        custom_emoji_id = (btn.get("custom_emoji_id") or "").strip() or None
+
+        rows.append([make_url_button(text=text, url=url,
+                    style=style, custom_emoji_id=custom_emoji_id)])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def parse_post_buttons(raw: str, bot_username: str, suggested_link: str = "") -> tuple[list[dict[str, str]], list[str]]:
+    """Parse up to 10 button lines.
+
+    هر خط:
+    متن دکمه | لینک | رنگ
+
+    رنگ اختیاری است:
+    سبز/success، قرمز/danger، آبی/primary، معمولی/default
+    """
+    value = str(raw or "").strip()
+    errors: list[str] = []
+    buttons: list[dict[str, str]] = []
+
+    if value == "/skip":
+        if suggested_link:
+            return [{"text": "🎬 دریافت فایل", "url": suggested_link, "style": "success"}], []
+        return [], ["برای /skip باید اول فایل ثبت‌شده انتخاب شده باشد یا لینک پیشنهادی وجود داشته باشد."]
+
+    lines = [ln.strip() for ln in value.splitlines() if ln.strip()]
+    if len(lines) > 10:
+        errors.append("حداکثر ۱۰ دکمه مجاز است؛ فقط ۱۰ خط اول بررسی شد.")
+        lines = lines[:10]
+
+    for idx, line in enumerate(lines, start=1):
+        parts = [p.strip() for p in line.split("|")]
+
+        if len(parts) < 2:
+            errors.append(
+                f"خط {idx}: فرمت درست نیست. نمونه: متن دکمه | لینک | سبز")
+            continue
+
+        text = parts[0]
+        raw_link = parts[1]
+        style = normalize_button_style(parts[2] if len(parts) >= 3 else None)
+
+        if not text:
+            errors.append(f"خط {idx}: متن دکمه خالی است.")
+            continue
+
+        if len(text) > 80:
+            errors.append(f"خط {idx}: متن دکمه خیلی طولانی است.")
+            continue
+
+        if raw_link == "/skip" and suggested_link:
+            url = suggested_link
+        else:
+            url = normalize_post_button_url(raw_link, bot_username)
+
+        if not url:
+            errors.append(f"خط {idx}: لینک معتبر نیست.")
+            continue
+
+        buttons.append({
+            "text": text,
+            "url": url,
+            "style": style or "",
+        })
+
+    if not buttons:
+        errors.append("هیچ دکمه معتبری ساخته نشد.")
+
+    return buttons, errors
 
 
 def choose_post_file_kb(items) -> InlineKeyboardMarkup:
@@ -1856,23 +1965,121 @@ def parse_target_channels(raw: str) -> list[str]:
     return channels
 
 
+def post_button_color_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🟢 سبز", callback_data="pbc:success"),
+                InlineKeyboardButton(
+                    text="🔴 قرمز", callback_data="pbc:danger"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔵 آبی", callback_data="pbc:primary"),
+                InlineKeyboardButton(text="⚪ معمولی", callback_data="pbc:"),
+            ],
+        ]
+    )
+
+
+def post_buttons_next_kb(buttons_count: int) -> InlineKeyboardMarkup:
+    rows = []
+    if buttons_count < 10:
+        rows.append([InlineKeyboardButton(
+            text="➕ افزودن دکمه دیگر", callback_data="pbnext:add")])
+    rows.append([InlineKeyboardButton(
+        text=f"✅ پایان دکمه‌ها ({buttons_count})", callback_data="pbnext:finish")])
+    rows.append([InlineKeyboardButton(
+        text="🧹 پاک کردن همه دکمه‌ها", callback_data="pbnext:clear")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def buttons_preview_text(buttons: list[dict[str, str]]) -> str:
+    if not buttons:
+        return "هنوز دکمه‌ای اضافه نشده است."
+    lines = []
+    for i, btn in enumerate(buttons, start=1):
+        style = btn.get("style") or "معمولی"
+        lines.append(f"{i}. {btn.get('text', 'دکمه')} — {style}")
+    return "\n".join(lines)
+
+
+async def ask_button_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    buttons = data.get("buttons", []) or []
+    suggested_link = data.get("suggested_link", "")
+
+    if len(buttons) >= 10:
+        await ask_target_channels_after_step_buttons(message, state)
+        return
+
+    extra = ""
+    if suggested_link and not buttons:
+        extra = "\n\nاگر می‌خوای یک دکمه پیش‌فرض «🔥 دریافت فایل 🔥» با لینک فایل ساخته شود، /skip بزن."
+
+    await state.update_data(button_step="text", pending_button=None)
+    await message.answer(
+        f"حالا متن دکمه شیشه‌ای را بفرست.\n\n"
+        f"دکمه‌های ساخته‌شده: <code>{len(buttons)}</code> از <code>10</code>\n\n"
+        "مثال:\n"
+        "<code>🔥 دریافت فایل 🔥</code>\n"
+        "<code>📣 ورود به کانال</code>\n"
+        "<code>💎 مشاهده سایت</code>"
+        f"{extra}"
+    )
+
+
+async def ask_target_channels_after_step_buttons(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    buttons = data.get("buttons", []) or []
+
+    if not buttons:
+        await message.answer("❌ هنوز هیچ دکمه‌ای نساختی. اول حداقل یک دکمه اضافه کن.")
+        await ask_button_text(message, state)
+        return
+
+    await state.set_state(CreateChannelPostState.target_channels)
+
+    default_text = ""
+    if POST_CHANNEL_ID:
+        default_text = (
+            "\n\nاگر می‌خوای به کانال پیش‌فرض Railway ارسال شود، /default بزن.\n"
+            f"کانال پیش‌فرض: <code>{POST_CHANNEL_ID}</code>"
+        )
+
+    await message.answer(
+        "✅ دکمه‌ها آماده شدند:\n"
+        + buttons_preview_text(buttons)
+        + "\n\nحالا کانال مقصد انتشار پست را بفرست.\n\n"
+        "مثال برای یک کانال:\n"
+        "<code>@YourChannel</code>\n\n"
+        "مثال برای چند کانال:\n"
+        "<code>@Channel1 @Channel2 -1001234567890</code>"
+        f"{default_text}\n\n"
+        "نکته: ربات باید داخل همه این کانال‌ها ادمین باشد و اجازه ارسال پست داشته باشد."
+    )
+
+
 async def publish_channel_post(
     bot: Bot,
     target_channels: list[str],
     post_text: str,
     media_type: str | None,
     media_file_id: str | None,
-    button_text: str,
-    button_url: str,
+    buttons: list[dict[str, str]],
 ) -> tuple[list[tuple[str, int]], list[str]]:
     if not target_channels:
         raise RuntimeError("target channel is not set")
+
+    if not buttons:
+        raise RuntimeError("buttons are not set")
 
     text = (post_text or "").strip()
     if not text:
         text = "برای ادامه روی دکمه زیر بزن."
 
-    reply_markup = custom_post_button_kb(button_text, button_url)
+    reply_markup = custom_post_buttons_kb(buttons)
 
     if media_file_id and len(text) > 1000:
         raise RuntimeError("caption_too_long")
@@ -2018,94 +2225,172 @@ async def create_channel_post_media(message: Message, state: FSMContext) -> None
             )
             return
 
-    await state.update_data(media_type=media_type, media_file_id=media_file_id)
-    await state.set_state(CreateChannelPostState.button_text)
-    await message.answer(
-        "حالا متن دکمه شیشه‌ای را بفرست.\n\n"
-        "مثال:\n"
-        "<code>🎬 دریافت فایل</code>\n\n"
-        "اگر همین متن پیش‌فرض را می‌خوای، /skip بزن."
+    await state.update_data(
+        media_type=media_type,
+        media_file_id=media_file_id,
+        buttons=[],
+        pending_button=None,
+        button_step="text",
     )
+    await state.set_state(CreateChannelPostState.buttons)
+    await ask_button_text(message, state)
 
 
-@router.message(CreateChannelPostState.button_text)
-async def create_channel_post_button_text(message: Message, state: FSMContext) -> None:
+@router.message(CreateChannelPostState.buttons)
+async def create_channel_post_button_step(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    step = data.get("button_step", "text")
+    buttons = data.get("buttons", []) or []
+
+    if len(buttons) >= 10:
+        await ask_target_channels_after_step_buttons(message, state)
         return
 
     raw = (message.text or "").strip()
-    button_text = "🎬 دریافت فایل" if raw == "/skip" or not raw else raw
 
-    if len(button_text) > 60:
-        await message.answer("متن دکمه خیلی طولانیه. کوتاه‌تر بفرست.")
+    if step == "text":
+        suggested_link = data.get("suggested_link", "")
+
+        if raw == "/skip":
+            if suggested_link and not buttons:
+                await state.update_data(pending_button={"text": "🔥 دریافت فایل 🔥", "url": suggested_link}, button_step="color")
+                await message.answer(
+                    "رنگ دکمه را انتخاب کن:\n\n"
+                    "متن: <b>🔥 دریافت فایل 🔥</b>\n"
+                    f"لینک: <code>{suggested_link}</code>",
+                    reply_markup=post_button_color_kb(),
+                )
+                return
+
+            await message.answer("برای /skip باید اول فایل ثبت‌شده انتخاب شده باشد.")
+            return
+
+        if not raw:
+            await message.answer("متن دکمه خالی است. دوباره بفرست.")
+            return
+
+        if len(raw) > 80:
+            await message.answer("متن دکمه خیلی طولانیه. کوتاه‌تر بفرست.")
+            return
+
+        await state.update_data(pending_button={"text": raw}, button_step="link")
+        await message.answer(
+            "حالا لینک همین دکمه را بفرست.\n\n"
+            f"متن دکمه: <b>{raw}</b>\n\n"
+            "مثال:\n"
+            "<code>https://t.me/YourChannel</code>\n"
+            "<code>https://example.com</code>\n"
+            "<code>l_5</code>"
+        )
+        return
+
+    if step == "link":
+        pending = data.get("pending_button") or {}
+        if not pending.get("text"):
+            await ask_button_text(message, state)
+            return
+
+        if raw == "/skip" and data.get("suggested_link"):
+            button_url = data["suggested_link"]
+        else:
+            me = await message.bot.get_me()
+            button_url = normalize_post_button_url(raw, me.username)
+
+        if not button_url:
+            await message.answer(
+                "لینک معتبر نیست.\n\n"
+                "لینک کامل بفرست، مثلا:\n"
+                "<code>https://t.me/YourChannel</code>\n"
+                "یا:\n"
+                "<code>https://example.com</code>"
+            )
+            return
+
+        pending["url"] = button_url
+        await state.update_data(pending_button=pending, button_step="color")
+        await message.answer(
+            "رنگ دکمه را انتخاب کن:\n\n"
+            f"متن: <b>{pending['text']}</b>\n"
+            f"لینک: <code>{button_url}</code>",
+            reply_markup=post_button_color_kb(),
+        )
+        return
+
+    await ask_button_text(message, state)
+
+
+@router.callback_query(CreateChannelPostState.buttons, F.data.startswith("pbc:"))
+async def create_channel_post_button_color(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
         return
 
     data = await state.get_data()
-    suggested_link = data.get("suggested_link", "")
+    pending = data.get("pending_button") or {}
+    buttons = data.get("buttons", []) or []
 
-    await state.update_data(button_text=button_text)
-    await state.set_state(CreateChannelPostState.button_link)
-
-    if suggested_link:
-        await message.answer(
-            "حالا لینک دکمه را بفرست.\n\n"
-            "چون اول فایل ثبت‌شده انتخاب کردی، اگر می‌خوای همین لینک فایل استفاده شود، /skip بزن.\n\n"
-            f"لینک پیشنهادی:\n<code>{suggested_link}</code>\n\n"
-            "همچنین می‌تونی لینک دلخواه بفرستی."
-        )
-    else:
-        await message.answer(
-            "حالا لینک دکمه را بفرست.\n\n"
-            "مثال لینک مستقیم:\n"
-            "<code>https://t.me/@Seoteamsupport</code>\n\n"
-            "یا اگر می‌خوای به فایل ثبت‌شده وصل شود، فقط آیدی فایل را بفرست. مثلا:\n"
-            "<code>12</code>"
-        )
-
-
-@router.message(CreateChannelPostState.button_link)
-async def create_channel_post_button_link(message: Message, state: FSMContext) -> None:
-    if not is_admin(message.from_user.id):
+    if not pending.get("text") or not pending.get("url"):
+        await call.answer("دکمه ناقص است.", show_alert=True)
+        await ask_button_text(call.message, state)
         return
 
-    data = await state.get_data()
-    raw_link = (message.text or "").strip()
-
-    if raw_link == "/skip" and data.get("suggested_link"):
-        button_url = data["suggested_link"]
-    else:
-        me = await message.bot.get_me()
-        button_url = normalize_post_button_url(raw_link, me.username)
-
-    if not button_url:
-        await message.answer(
-            "لینک معتبر نیست.\n\n"
-            "لینک کامل بفرست، مثلا:\n"
-            "<code>https://t.me/@Seoteamsupport</code>\n\n"
-            "یا آیدی فایل ثبت‌شده را بفرست، مثلا:\n"
-            "<code>12</code>"
-        )
+    if len(buttons) >= 10:
+        await call.answer("حداکثر ۱۰ دکمه مجاز است.", show_alert=True)
         return
 
-    await state.update_data(button_url=button_url)
-    await state.set_state(CreateChannelPostState.target_channels)
+    style = call.data.split(":", 1)[1]
+    buttons.append({
+        "text": pending["text"],
+        "url": pending["url"],
+        "style": normalize_button_style(style) or "",
+    })
 
-    default_text = ""
-    if POST_CHANNEL_ID:
-        default_text = (
-            "\n\nاگر می‌خوای به کانال پیش‌فرض Railway ارسال شود، /default بزن.\n"
-            f"کانال پیش‌فرض: <code>{POST_CHANNEL_ID}</code>"
-        )
+    await state.update_data(buttons=buttons, pending_button=None, button_step="next")
 
-    await message.answer(
-        "حالا کانال مقصد انتشار پست را بفرست.\n\n"
-        "مثال برای یک کانال:\n"
-        "<code>@YourChannel</code>\n\n"
-        "مثال برای چند کانال:\n"
-        "<code>@Channel1 @Channel2 -1001234567890</code>\n"
-        f"{default_text}\n\n"
-        "نکته: ربات باید داخل همه این کانال‌ها ادمین باشد و اجازه ارسال پست داشته باشد."
+    await call.message.answer(
+        "✅ دکمه اضافه شد.\n\n"
+        "دکمه‌های فعلی:\n"
+        + buttons_preview_text(buttons)
+        + "\n\nمی‌خوای دکمه دیگری اضافه کنی؟",
+        reply_markup=post_buttons_next_kb(len(buttons)),
     )
+    await call.answer()
+
+
+@router.callback_query(CreateChannelPostState.buttons, F.data.startswith("pbnext:"))
+async def create_channel_post_button_next(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    action = call.data.split(":", 1)[1]
+    data = await state.get_data()
+    buttons = data.get("buttons", []) or []
+
+    if action == "add":
+        if len(buttons) >= 10:
+            await call.answer("حداکثر ۱۰ دکمه مجاز است.", show_alert=True)
+            return
+        await ask_button_text(call.message, state)
+        await call.answer()
+        return
+
+    if action == "clear":
+        await state.update_data(buttons=[], pending_button=None, button_step="text")
+        await call.message.answer("🧹 همه دکمه‌های این پست پاک شد.")
+        await ask_button_text(call.message, state)
+        await call.answer()
+        return
+
+    if action == "finish":
+        await ask_target_channels_after_step_buttons(call.message, state)
+        await call.answer()
+        return
+
+    await call.answer("گزینه نامعتبر است.", show_alert=True)
 
 
 @router.message(CreateChannelPostState.target_channels)
@@ -2127,15 +2412,19 @@ async def create_channel_post_target_channels(message: Message, state: FSMContex
         return
 
     try:
+        buttons = data.get("buttons", [])
         sent_to, failed = await publish_channel_post(
             bot=message.bot,
             target_channels=target_channels,
             post_text=data.get("post_text", ""),
             media_type=data.get("media_type"),
             media_file_id=data.get("media_file_id"),
-            button_text=data.get("button_text", "🎬 دریافت فایل"),
-            button_url=data.get("button_url", ""),
+            buttons=buttons,
         )
+
+        button_text_summary = " | ".join(str(btn.get("text", "")) for btn in buttons)[
+            :240] if buttons else "—"
+        button_url_summary = str(buttons[0].get("url", "")) if buttons else ""
 
         for target, msg_id in sent_to:
             await crud.add_channel_post(
@@ -2143,8 +2432,8 @@ async def create_channel_post_target_channels(message: Message, state: FSMContex
                 message_id=msg_id,
                 file_id=data.get("file_id"),
                 post_text=data.get("post_text", ""),
-                button_text=data.get("button_text", "🎬 دریافت فایل"),
-                button_url=data.get("button_url", ""),
+                button_text=button_text_summary,
+                button_url=button_url_summary,
                 media_type=data.get("media_type"),
             )
     except RuntimeError as e:
@@ -3055,7 +3344,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v8.5-clean-join-text")
+    print("Bot started — movie-bot-v8.8-step-button-builder")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
