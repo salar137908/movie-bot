@@ -742,3 +742,13 @@ POST_CHANNEL_ID=-1001234567890
 
 بعد از Deploy باید در Railway Logs ببینی:
 `Bot started — movie-bot-v8.8-step-button-builder`
+
+
+## نسخه v8.9 — اصلاح نمایش `\n\n` در متن عضویت
+
+در نسخه قبلی، در متن لینک فایل و بعضی بخش‌ها کاراکترهای `\n\n` به صورت نوشته نمایش داده می‌شدند.
+
+در این نسخه اصلاح شد و به جای `\n\n`، خط خالی واقعی نمایش داده می‌شود.
+
+بعد از Deploy باید در Railway Logs ببینی:
+`Bot started — movie-bot-v8.9-newline-fix`
