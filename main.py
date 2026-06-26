@@ -69,7 +69,7 @@ BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
 BTN_USER_EARN = "💰 کسب درآمد"
-TEAM_LINK = "https://t.me/NeoSeoTeam"
+TEAM_LINK = "https://t.me/Seoteamsupport"
 
 JOIN_REQUIRED_TEXT = "🔒 شما هنوز در کانال‌های زیر عضو نشده‌اید.\n\nبعد از عضویت، به ربات برگرد و روی «✅ بررسی عضویت» بزن 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
