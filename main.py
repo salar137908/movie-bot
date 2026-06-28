@@ -48,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v9.0-media-spoiler"
+BOT_VERSION = "movie-bot-v9.1-broadcast"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -59,6 +59,7 @@ BTN_STATS = "📊 آمار"
 BTN_BACKUP = "💾 بکاپ دیتابیس"
 BTN_CREATE_CHANNEL_POST = "📤 ساخت پست کانال"
 BTN_POSTS = "📋 لیست پست‌های کانال"
+BTN_BROADCAST = "📣 ارسال همگانی"
 BTN_HELP = "📌 راهنما"
 BTN_CHANNELS = "📢 کانال‌های اجباری"
 BTN_SECTION_CHANNELS = "🧩 کانال‌های بخش‌ها"
@@ -119,7 +120,10 @@ ADMIN_HELP_TEXT = """
 /files
 
 📤 ساخت پست کانال:
-از دکمه «📤 ساخت پست کانال» یا دستور /post استفاده کن. متن و مدیا را می‌فرستی؛ برای هر دکمه متن و لینک را جدا می‌فرستی، رنگ را با گزینه شیشه‌ای انتخاب می‌کنی و تا ۱۰ دکمه می‌سازی.
+از دکمه «📤 ساخت پست کانال» یا دستور /post استفاده کن.
+
+📣 ارسال همگانی:
+از دکمه «📣 ارسال همگانی» یا دستور /broadcast استفاده کن. متن و مدیا را می‌فرستی؛ برای هر دکمه متن و لینک را جدا می‌فرستی، رنگ را با گزینه شیشه‌ای انتخاب می‌کنی و تا ۱۰ دکمه می‌سازی.
 
 📢 مدیریت کانال‌های اجباری:
 از دکمه «📢 کانال‌های اجباری» یا دستور /channels استفاده کن.
@@ -159,6 +163,11 @@ class CreateChannelPostState(StatesGroup):
     media = State()
     buttons = State()
     target_channels = State()
+
+
+class BroadcastState(StatesGroup):
+    content = State()
+    confirm = State()
 
 
 class AddSectionChannelState(StatesGroup):
@@ -215,6 +224,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
              KeyboardButton(text=BTN_FILES)],
             [KeyboardButton(text=BTN_CREATE_CHANNEL_POST),
              KeyboardButton(text=BTN_POSTS)],
+            [KeyboardButton(text=BTN_BROADCAST)],
             [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_BACKUP)],
             [KeyboardButton(text=BTN_CHANNELS)],
             [KeyboardButton(text=BTN_ADD_REQUIRED_CHANNEL)],
@@ -3279,6 +3289,140 @@ async def auto_backup_loop(bot: Bot) -> None:
         await send_database_backup(bot, reason=f"auto-every-{hours}h")
 
 
+# ============================================================
+# ارسال همگانی به کاربران ربات
+# ============================================================
+
+def broadcast_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="✅ ارسال به همه کاربران فعال", callback_data="broadcast:send")],
+            [InlineKeyboardButton(text="❌ لغو ارسال همگانی",
+                                  callback_data="broadcast:cancel")],
+        ]
+    )
+
+
+@router.message(F.text == BTN_BROADCAST)
+@router.message(Command("broadcast"))
+async def broadcast_start(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.clear()
+    await state.set_state(BroadcastState.content)
+
+    users_count = await crud.count_users()
+
+    await message.answer(
+        "📣 <b>ارسال همگانی</b>\n\n"
+        f"کاربران ثبت‌شده در دیتابیس: <code>{users_count}</code>\n\n"
+        "متن، عکس، ویدیو، گیف، فایل یا همان پست کانالی که می‌خواهی برای کاربران بفرستی را همینجا ارسال کن.\n\n"
+        "می‌تونی از کانال هم Forward کنی.\n\n"
+        "بعد از ارسال محتوا، ربات قبل از ارسال همگانی ازت تایید می‌گیرد.\n\n"
+        "برای لغو: /cancel"
+    )
+
+
+@router.message(BroadcastState.content)
+async def broadcast_receive_content(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    # پیام دستوری را به عنوان محتوا قبول نکنیم، مگر خود ادمین بخواهد متن معمولی بفرستد.
+    if (message.text or "").strip() in {"/cancel", BTN_HELP, BTN_BROADCAST}:
+        await state.clear()
+        await message.answer("❌ ارسال همگانی لغو شد.", reply_markup=admin_menu())
+        return
+
+    await state.update_data(
+        from_chat_id=message.chat.id,
+        message_id=message.message_id,
+    )
+    await state.set_state(BroadcastState.confirm)
+
+    users_count = await crud.count_users()
+
+    await message.answer(
+        "✅ محتوا دریافت شد.\n\n"
+        f"تعداد کاربران ثبت‌شده: <code>{users_count}</code>\n\n"
+        "برای شروع ارسال همگانی، تایید کن.\n\n"
+        "نکته: اگر بعضی کاربران ربات را بلاک کرده باشند، ارسال برای آن‌ها ناموفق ثبت می‌شود.",
+        reply_markup=broadcast_confirm_kb(),
+    )
+
+
+@router.callback_query(BroadcastState.confirm, F.data == "broadcast:cancel")
+async def broadcast_cancel_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    await state.clear()
+    await call.message.answer("❌ ارسال همگانی لغو شد.", reply_markup=admin_menu())
+    await call.answer()
+
+
+@router.callback_query(BroadcastState.confirm, F.data == "broadcast:send")
+async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(call.from_user.id):
+        await call.answer("دسترسی نداری.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    from_chat_id = data.get("from_chat_id")
+    message_id = data.get("message_id")
+
+    if not from_chat_id or not message_id:
+        await state.clear()
+        await call.message.answer("❌ محتوای ارسال همگانی پیدا نشد. دوباره شروع کن.", reply_markup=admin_menu())
+        await call.answer()
+        return
+
+    users = await crud.get_users()
+    targets = [u.telegram_id for u in users if u.telegram_id not in ADMIN_IDS]
+
+    await call.message.answer(
+        "⏳ ارسال همگانی شروع شد...\n\n"
+        f"تعداد کاربران هدف: <code>{len(targets)}</code>\n"
+        "تا پایان ارسال صبر کن."
+    )
+    await call.answer()
+
+    sent = 0
+    failed = 0
+    blocked = 0
+
+    for user_id in targets:
+        try:
+            await call.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+            )
+            sent += 1
+        except TelegramForbiddenError:
+            blocked += 1
+            failed += 1
+        except Exception:
+            failed += 1
+
+        # رعایت محدودیت ارسال تلگرام و جلوگیری از فشار زیاد
+        await asyncio.sleep(0.05)
+
+    await state.clear()
+
+    await call.message.answer(
+        "✅ ارسال همگانی تمام شد.\n\n"
+        f"موفق: <code>{sent}</code>\n"
+        f"ناموفق: <code>{failed}</code>\n"
+        f"بلاک کرده‌اند/دسترسی نیست: <code>{blocked}</code>",
+        reply_markup=admin_menu(),
+    )
+
+
 @router.message(F.text == BTN_BACKUP)
 @router.message(Command("backup"))
 async def backup_handler(message: Message) -> None:
@@ -3339,6 +3483,7 @@ async def main() -> None:
         BotCommand(command="backup", description="دریافت بکاپ دیتابیس"),
         BotCommand(command="post", description="ساخت پست دکمه‌دار کانال"),
         BotCommand(command="posts", description="لیست پست‌های منتشرشده"),
+        BotCommand(command="broadcast", description="ارسال همگانی"),
     ]
 
     for admin_id in ADMIN_IDS:
@@ -3350,7 +3495,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v9.0-media-spoiler")
+    print("Bot started — movie-bot-v9.1-broadcast")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
