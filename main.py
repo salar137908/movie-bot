@@ -48,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v9.2-broadcast-order-fix"
+BOT_VERSION = "movie-bot-v9.3-broadcast-buttons-fix"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -3284,17 +3284,27 @@ async def broadcast_receive_content(message: Message, state: FSMContext) -> None
         await message.answer("❌ ارسال همگانی لغو شد.", reply_markup=admin_menu())
         return
 
+    reply_markup_data = None
+    if message.reply_markup:
+        try:
+            reply_markup_data = message.reply_markup.model_dump(mode="json")
+        except Exception:
+            reply_markup_data = None
+
     await state.update_data(
         from_chat_id=message.chat.id,
         message_id=message.message_id,
+        reply_markup_data=reply_markup_data,
     )
     await state.set_state(BroadcastState.confirm)
 
     users_count = await crud.count_users()
+    buttons_status = "✅ دکمه شیشه‌ای تشخیص داده شد و همراه پیام ارسال می‌شود." if reply_markup_data else "⚠️ دکمه شیشه‌ای داخل این پیام تشخیص داده نشد."
 
     await message.answer(
         "✅ محتوا دریافت شد.\n\n"
         f"تعداد کاربران ثبت‌شده: <code>{users_count}</code>\n\n"
+        f"{buttons_status}\n\n"
         "برای شروع ارسال همگانی، تایید کن.\n\n"
         "نکته: اگر بعضی کاربران ربات را بلاک کرده باشند، ارسال برای آن‌ها ناموفق ثبت می‌شود.",
         reply_markup=broadcast_confirm_kb(),
@@ -3338,6 +3348,14 @@ async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> Non
     )
     await call.answer()
 
+    reply_markup = None
+    reply_markup_data = data.get("reply_markup_data")
+    if reply_markup_data:
+        try:
+            reply_markup = InlineKeyboardMarkup.model_validate(reply_markup_data)
+        except Exception:
+            reply_markup = None
+
     sent = 0
     failed = 0
     blocked = 0
@@ -3348,6 +3366,7 @@ async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> Non
                 chat_id=user_id,
                 from_chat_id=from_chat_id,
                 message_id=message_id,
+                reply_markup=reply_markup,
             )
             sent += 1
         except TelegramForbiddenError:
@@ -3449,7 +3468,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v9.2-broadcast-order-fix")
+    print("Bot started — movie-bot-v9.3-broadcast-buttons-fix")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
