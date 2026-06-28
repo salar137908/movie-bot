@@ -9,7 +9,7 @@ from typing import Any
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -48,7 +48,7 @@ from database import init_db
 # ============================================================
 # مرکز کنترل متن‌ها و دکمه‌ها
 # ============================================================
-BOT_VERSION = "movie-bot-v9.3-broadcast-buttons-fix"
+BOT_VERSION = "movie-bot-v9.4-broadcast-progress"
 BOT_TITLE = "🎬 ربات دریافت فایل"
 WELCOME_TEXT = "سلام 👋\nبرای دریافت فایل، از لینک مخصوص داخل کانال وارد ربات شوید."
 ADMIN_WELCOME_TEXT = "سلام ادمین 👋\nاز منوی زیر فایل‌ها را مدیریت کن."
@@ -70,7 +70,7 @@ BTN_USER_VPN_PREMIUM = "🔐 فیلترشکن پرمیوم رایگان"
 BTN_USER_ACCOUNTS = "💎 دریافت اکانت های پولی سایت های معروف"
 BTN_USER_CONTACT = "☎️ ارتباط با تیم ما"
 BTN_USER_EARN = "💰 کسب درآمد"
-TEAM_LINK = "https://t.me/NeoSeoTeam"
+TEAM_LINK = "https://t.me/Seoteamsupport"
 
 JOIN_REQUIRED_TEXT = "🔒 شما هنوز در کانال‌های زیر عضو نشده‌اید.\n\nبعد از عضویت، به ربات برگرد و روی «✅ بررسی عضویت» بزن 👇"
 BTN_JOIN_CHANNEL = "📢 عضویت در کانال"
@@ -106,7 +106,6 @@ SECTION_RESULT_TEXTS: dict[str, str] = {
 }
 
 SECTION_KEY_HELP = "telegram | vpn | accounts | contact"
-
 
 
 # نکته: چون پیام‌ها با HTML ارسال می‌شوند، داخل متن راهنما از <ID> استفاده نکن.
@@ -179,7 +178,6 @@ def is_admin(user_id: int | None) -> bool:
     return bool(user_id and user_id in ADMIN_IDS)
 
 
-
 def team_link_kb(text: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -188,13 +186,15 @@ def team_link_kb(text: str) -> InlineKeyboardMarkup:
     )
 
 
-
 def inline_user_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=BTN_USER_TELEGRAM, callback_data="usersec:telegram")],
-            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM, callback_data="usersec:vpn")],
-            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS, callback_data="usersec:accounts")],
+            [InlineKeyboardButton(text=BTN_USER_TELEGRAM,
+                                  callback_data="usersec:telegram")],
+            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM,
+                                  callback_data="usersec:vpn")],
+            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS,
+                                  callback_data="usersec:accounts")],
             [InlineKeyboardButton(text=BTN_USER_CONTACT, url=TEAM_LINK)],
             [InlineKeyboardButton(text=BTN_USER_EARN, url=TEAM_LINK)],
         ]
@@ -215,11 +215,15 @@ def user_menu() -> ReplyKeyboardMarkup:
 def admin_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_USER_TELEGRAM), KeyboardButton(text=BTN_USER_VPN_PREMIUM)],
-            [KeyboardButton(text=BTN_USER_ACCOUNTS), KeyboardButton(text=BTN_USER_CONTACT)],
+            [KeyboardButton(text=BTN_USER_TELEGRAM),
+             KeyboardButton(text=BTN_USER_VPN_PREMIUM)],
+            [KeyboardButton(text=BTN_USER_ACCOUNTS),
+             KeyboardButton(text=BTN_USER_CONTACT)],
             [KeyboardButton(text=BTN_USER_EARN)],
-            [KeyboardButton(text=BTN_ADD_FILE), KeyboardButton(text=BTN_FILES)],
-            [KeyboardButton(text=BTN_CREATE_CHANNEL_POST), KeyboardButton(text=BTN_POSTS)],
+            [KeyboardButton(text=BTN_ADD_FILE),
+             KeyboardButton(text=BTN_FILES)],
+            [KeyboardButton(text=BTN_CREATE_CHANNEL_POST),
+             KeyboardButton(text=BTN_POSTS)],
             [KeyboardButton(text=BTN_BROADCAST)],
             [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_BACKUP)],
             [KeyboardButton(text=BTN_CHANNELS)],
@@ -233,14 +237,19 @@ def admin_menu() -> ReplyKeyboardMarkup:
 def menu_for_user(user_id: int) -> ReplyKeyboardMarkup:
     return admin_menu() if is_admin(user_id) else user_menu()
 
+
 def add_required_channel_target_kb() -> InlineKeyboardMarkup:
     """Admin helper: choose where the forced-join channel should be used."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚪 عضویت اجباری شروع ربات", callback_data="addgate:main")],
-            [InlineKeyboardButton(text="🔐 فیلترشکن پرمیوم رایگان", callback_data="addgate:vpn")],
-            [InlineKeyboardButton(text="💎 اکانت های پولی سایت های معروف", callback_data="addgate:accounts")],
-            [InlineKeyboardButton(text="📢 کانال تلگرام", callback_data="addgate:telegram")],
+            [InlineKeyboardButton(
+                text="🚪 عضویت اجباری شروع ربات", callback_data="addgate:main")],
+            [InlineKeyboardButton(
+                text="🔐 فیلترشکن پرمیوم رایگان", callback_data="addgate:vpn")],
+            [InlineKeyboardButton(
+                text="💎 اکانت های پولی سایت های معروف", callback_data="addgate:accounts")],
+            [InlineKeyboardButton(text="📢 کانال تلگرام",
+                                  callback_data="addgate:telegram")],
         ]
     )
 
@@ -260,11 +269,16 @@ CHANNEL_MANAGER_TARGETS: dict[str, str] = {
 def channel_manager_root_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚪 عضویت اجباری شروع ربات", callback_data="managegate:main")],
-            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM, callback_data="managegate:vpn")],
-            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS, callback_data="managegate:accounts")],
-            [InlineKeyboardButton(text=BTN_USER_TELEGRAM, callback_data="managegate:telegram")],
-            [InlineKeyboardButton(text="➕ افزودن کانال اجباری", callback_data="manageaddmenu")],
+            [InlineKeyboardButton(
+                text="🚪 عضویت اجباری شروع ربات", callback_data="managegate:main")],
+            [InlineKeyboardButton(text=BTN_USER_VPN_PREMIUM,
+                                  callback_data="managegate:vpn")],
+            [InlineKeyboardButton(text=BTN_USER_ACCOUNTS,
+                                  callback_data="managegate:accounts")],
+            [InlineKeyboardButton(text=BTN_USER_TELEGRAM,
+                                  callback_data="managegate:telegram")],
+            [InlineKeyboardButton(
+                text="➕ افزودن کانال اجباری", callback_data="manageaddmenu")],
         ]
     )
 
@@ -317,13 +331,18 @@ def channel_manager_list_kb(target: str, channels) -> InlineKeyboardMarkup:
     for ch in channels:
         title = getattr(ch, "title", None) or getattr(ch, "chat_id", "کانال")
         short_title = str(title)[:24]
-        rows.append([InlineKeyboardButton(text=f"📌 {short_title}", callback_data=f"noop:{target}:{ch.id}")])
+        rows.append([InlineKeyboardButton(
+            text=f"📌 {short_title}", callback_data=f"noop:{target}:{ch.id}")])
         rows.append([
-            InlineKeyboardButton(text="✏️ ادیت", callback_data=f"manageedit:{target}:{ch.id}"),
-            InlineKeyboardButton(text="🗑 حذف", callback_data=f"managedel:{target}:{ch.id}"),
+            InlineKeyboardButton(
+                text="✏️ ادیت", callback_data=f"manageedit:{target}:{ch.id}"),
+            InlineKeyboardButton(
+                text="🗑 حذف", callback_data=f"managedel:{target}:{ch.id}"),
         ])
-    rows.append([InlineKeyboardButton(text="➕ افزودن کانال جدید", callback_data=f"manageadd:{target}")])
-    rows.append([InlineKeyboardButton(text="🔙 برگشت به بخش‌ها", callback_data="manageback")])
+    rows.append([InlineKeyboardButton(text="➕ افزودن کانال جدید",
+                callback_data=f"manageadd:{target}")])
+    rows.append([InlineKeyboardButton(
+        text="🔙 برگشت به بخش‌ها", callback_data="manageback")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -336,7 +355,8 @@ async def send_channel_target_list(message_or_call, target: str) -> None:
     title = CHANNEL_MANAGER_TARGETS[target]
     lines = [f"📢 <b>{title}</b>\n"]
     if not channels:
-        lines.append("هنوز برای این بخش کانال فعالی ثبت نشده است. از دکمه افزودن استفاده کن.")
+        lines.append(
+            "هنوز برای این بخش کانال فعالی ثبت نشده است. از دکمه افزودن استفاده کن.")
     else:
         lines.append("لیست کانال‌های فعال این بخش:\n")
         for ch in channels:
@@ -414,12 +434,12 @@ async def join_keyboard(payload: str, bot: Bot | None = None, user_id: int | Non
     for ch in channels:
         if ch.get("link"):
             title = ch.get("title") or "کانال"
-            rows.append([InlineKeyboardButton(text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
+            rows.append([InlineKeyboardButton(
+                text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
 
-    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"check:{payload}")])
+    rows.append([InlineKeyboardButton(
+        text=BTN_CHECK_JOIN, callback_data=f"check:{payload}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 
 
 def extract_file_link_id_from_payload(payload: str | None) -> int | None:
@@ -455,9 +475,11 @@ async def file_link_join_keyboard(link_id: int, bot: Bot | None = None, user_id:
     for ch in channels:
         if ch.get("link"):
             title = ch.get("title") or "کانال"
-            rows.append([InlineKeyboardButton(text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
+            rows.append([InlineKeyboardButton(
+                text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
 
-    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"link_check:{link_id}")])
+    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN,
+                callback_data=f"link_check:{link_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -467,7 +489,6 @@ async def is_file_link_member(bot: Bot, user_id: int, link_id: int) -> bool:
         return True
     missing = await get_missing_channels(bot, user_id, channels)
     return len(missing) == 0
-
 
 
 def file_link_join_text(link_id: int, missing_channels: list[dict[str, str]] | None = None) -> str:
@@ -486,15 +507,20 @@ async def file_link_url(bot: Bot, link_id: int) -> str:
 def file_link_manage_kb(link_id: int, file_id: int | None = None, is_active: bool = True) -> InlineKeyboardMarkup:
     toggle_text = "⛔️ غیرفعال کردن لینک" if is_active else "✅ فعال کردن لینک"
     rows = [
-        [InlineKeyboardButton(text="📢 تنظیم کانال‌های همین لینک", callback_data=f"setlinkch:{link_id}")],
+        [InlineKeyboardButton(text="📢 تنظیم کانال‌های همین لینک",
+                              callback_data=f"setlinkch:{link_id}")],
         [
-            InlineKeyboardButton(text=toggle_text, callback_data=f"linktoggle:{link_id}"),
-            InlineKeyboardButton(text="📋 کانال‌های لینک", callback_data=f"linkchannels:{link_id}"),
+            InlineKeyboardButton(
+                text=toggle_text, callback_data=f"linktoggle:{link_id}"),
+            InlineKeyboardButton(text="📋 کانال‌های لینک",
+                                 callback_data=f"linkchannels:{link_id}"),
         ],
     ]
     if file_id:
-        rows.append([InlineKeyboardButton(text="➕ ساخت لینک جدید برای همین فایل", callback_data=f"newlink:{file_id}")])
-        rows.append([InlineKeyboardButton(text="🔗 همه لینک‌های این فایل", callback_data=f"filelinks:{file_id}")])
+        rows.append([InlineKeyboardButton(
+            text="➕ ساخت لینک جدید برای همین فایل", callback_data=f"newlink:{file_id}")])
+        rows.append([InlineKeyboardButton(
+            text="🔗 همه لینک‌های این فایل", callback_data=f"filelinks:{file_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -537,9 +563,11 @@ async def section_join_keyboard(section_key: str, bot: Bot | None = None, user_i
     for ch in channels:
         if ch.get("link"):
             title = ch.get("title") or "کانال"
-            rows.append([InlineKeyboardButton(text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
+            rows.append([InlineKeyboardButton(
+                text=f"{BTN_JOIN_CHANNEL} {title}", url=ch["link"])])
 
-    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN, callback_data=f"section_check:{section_key}")])
+    rows.append([InlineKeyboardButton(text=BTN_CHECK_JOIN,
+                callback_data=f"section_check:{section_key}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -549,7 +577,6 @@ async def is_section_member(bot: Bot, user_id: int, section_key: str) -> bool:
         return False
     missing = await get_missing_channels(bot, user_id, channels)
     return len(missing) == 0
-
 
 
 def section_join_text(section_key: str, missing_channels: list[dict[str, str]] | None = None) -> str:
@@ -670,6 +697,7 @@ async def delete_file_later(bot: Bot, chat_id: int, file_message_id: int, warnin
         except Exception:
             pass
 
+
 async def send_file_to_user(bot: Bot, chat_id: int, file_id: int) -> None:
     item = await crud.get_file(file_id)
     if item is None or not item.is_active:
@@ -760,6 +788,7 @@ async def send_file_to_user(bot: Bot, chat_id: int, file_id: int) -> None:
         )
     )
 
+
 async def handle_file_request(message: Message, payload: str) -> None:
     link_id = extract_file_link_id_from_payload(payload)
     if link_id is not None:
@@ -791,7 +820,6 @@ async def handle_file_request(message: Message, payload: str) -> None:
         return
 
     await send_file_to_user(message.bot, message.chat.id, file_id)
-
 
 
 @router.message(Command("cancel"))
@@ -834,7 +862,6 @@ async def start_handler(message: Message, command: CommandStart) -> None:
         await message.answer("سلام 👋\nیکی از گزینه‌های زیر را انتخاب کن:", reply_markup=inline_user_menu())
 
 
-
 @router.message(F.text == BTN_USER_CONTACT)
 async def contact_team_handler(message: Message) -> None:
     await message.answer(
@@ -849,7 +876,6 @@ async def earn_money_handler(message: Message) -> None:
         "💰 برای هماهنگی درباره کسب درآمد روی دکمه زیر بزن:",
         reply_markup=team_link_kb("💰 کسب درآمد"),
     )
-
 
 
 @router.callback_query(F.data.startswith("usersec:"))
@@ -915,7 +941,6 @@ async def section_check_callback(call: CallbackQuery) -> None:
         await call.message.edit_text(SECTION_RESULT_TEXTS.get(section_key, "✅ عضویت تایید شد."))
     except Exception:
         await call.message.answer(SECTION_RESULT_TEXTS.get(section_key, "✅ عضویت تایید شد."))
-
 
 
 @router.callback_query(F.data.startswith("link_check:"))
@@ -1020,8 +1045,6 @@ async def stats_handler(message: Message) -> None:
     await message.answer(f"📊 آمار ربات\n\n👥 کاربران: {users}\n🎬 فایل‌ها: {files}\n🔗 لینک‌های اختصاصی: {file_links}")
 
 
-
-
 def sqlite_db_path_from_url() -> Path:
     """Extract SQLite database file path from DATABASE_URL."""
     value = str(DATABASE_URL or "").strip()
@@ -1076,8 +1099,6 @@ async def send_database_backup(message: Message) -> None:
         backup_path.unlink(missing_ok=True)
     except Exception:
         pass
-
-
 
 
 @router.message(F.text == BTN_ADD_FILE)
@@ -1197,9 +1218,9 @@ async def add_file_forwarded(message: Message, state: FSMContext) -> None:
         f"لینک جدید با کانال‌های اختصاصی:\n<code>{link}</code>\n\n"
         f"لینک قدیمی سازگار با گیت عمومی:\n<code>{old_link}</code>\n\n"
         "حالا برای همین لینک، کانال‌های اجباری جدا تنظیم کن.",
-        reply_markup=file_link_manage_kb(link_item.id, file_id=item.id, is_active=True),
+        reply_markup=file_link_manage_kb(
+            link_item.id, file_id=item.id, is_active=True),
     )
-
 
 
 def file_manage_kb(file_id: int, is_active: bool) -> InlineKeyboardMarkup:
@@ -1207,15 +1228,20 @@ def file_manage_kb(file_id: int, is_active: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✏️ ادیت عنوان", callback_data=f"fileedit:{file_id}"),
-                InlineKeyboardButton(text=toggle_text, callback_data=f"filetoggle:{file_id}"),
+                InlineKeyboardButton(text="✏️ ادیت عنوان",
+                                     callback_data=f"fileedit:{file_id}"),
+                InlineKeyboardButton(
+                    text=toggle_text, callback_data=f"filetoggle:{file_id}"),
             ],
             [
-                InlineKeyboardButton(text="🔗 لینک‌های این فایل", callback_data=f"filelinks:{file_id}"),
-                InlineKeyboardButton(text="➕ لینک جدید", callback_data=f"newlink:{file_id}"),
+                InlineKeyboardButton(
+                    text="🔗 لینک‌های این فایل", callback_data=f"filelinks:{file_id}"),
+                InlineKeyboardButton(text="➕ لینک جدید",
+                                     callback_data=f"newlink:{file_id}"),
             ],
             [
-                InlineKeyboardButton(text="🗑 حذف کامل", callback_data=f"filedelete:{file_id}"),
+                InlineKeyboardButton(
+                    text="🗑 حذف کامل", callback_data=f"filedelete:{file_id}"),
             ],
         ]
     )
@@ -1255,7 +1281,6 @@ async def files_handler(message: Message) -> None:
         await send_file_card(message, item)
 
 
-
 async def send_file_links_list(message_or_call, file_id: int) -> None:
     item = await crud.get_file(file_id)
     if not item:
@@ -1269,7 +1294,8 @@ async def send_file_links_list(message_or_call, file_id: int) -> None:
     links = await crud.get_file_links(file_id=file_id, active_only=False, limit=50)
     me = await (message_or_call.bot.get_me() if isinstance(message_or_call, Message) else message_or_call.bot.get_me())
 
-    lines = [f"🔗 <b>لینک‌های فایل #{file_id}</b>\nعنوان: <b>{item.title}</b>\n"]
+    lines = [
+        f"🔗 <b>لینک‌های فایل #{file_id}</b>\nعنوان: <b>{item.title}</b>\n"]
     if not links:
         lines.append("هنوز برای این فایل لینک اختصاصی ساخته نشده است.")
     else:
@@ -1288,9 +1314,11 @@ async def send_file_links_list(message_or_call, file_id: int) -> None:
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ ساخت لینک جدید", callback_data=f"newlink:{file_id}")],
+            [InlineKeyboardButton(text="➕ ساخت لینک جدید",
+                                  callback_data=f"newlink:{file_id}")],
             *[
-                [InlineKeyboardButton(text=f"📢 مدیریت لینک #{ln.id}", callback_data=f"linkchannels:{ln.id}")]
+                [InlineKeyboardButton(
+                    text=f"📢 مدیریت لینک #{ln.id}", callback_data=f"linkchannels:{ln.id}")]
                 for ln in links[:20]
             ],
         ]
@@ -1331,7 +1359,8 @@ async def new_file_link_callback(call: CallbackQuery) -> None:
         f"Link ID: <code>{link_item.id}</code>\n\n"
         f"<code>{url}</code>\n\n"
         "حالا کانال‌های اجباری همین لینک را تنظیم کن.",
-        reply_markup=file_link_manage_kb(link_item.id, file_id=file_id, is_active=True),
+        reply_markup=file_link_manage_kb(
+            link_item.id, file_id=file_id, is_active=True),
     )
     await call.answer()
 
@@ -1361,7 +1390,8 @@ async def file_link_toggle_callback(call: CallbackQuery) -> None:
         f"File ID: <code>{link_item.file_id}</code>\n"
         f"کانال‌های اجباری فعال: <code>{len(channels)}</code>\n\n"
         f"<code>{url}</code>",
-        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+        reply_markup=file_link_manage_kb(
+            link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
     )
     await call.answer("✅ وضعیت لینک تغییر کرد.")
 
@@ -1398,7 +1428,8 @@ async def file_link_channels_callback(call: CallbackQuery) -> None:
 
     await call.message.answer(
         "\n".join(lines),
-        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+        reply_markup=file_link_manage_kb(
+            link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
     )
     await call.answer()
 
@@ -1458,7 +1489,8 @@ async def set_file_link_channels_save(message: Message, state: FSMContext) -> No
     for chat_id, invite_link in parsed:
         try:
             chat = await message.bot.get_chat(chat_id)
-            title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+            title = getattr(chat, "title", None) or getattr(
+                chat, "username", None) or str(chat_id)
             if not invite_link and getattr(chat, "username", None):
                 invite_link = f"https://t.me/{chat.username}"
 
@@ -1485,7 +1517,8 @@ async def set_file_link_channels_save(message: Message, state: FSMContext) -> No
     if saved:
         lines.append("\nکانال‌های ذخیره‌شده:")
         for item in saved:
-            lines.append(f"• <b>{item.title}</b> — <code>{item.chat_id}</code>")
+            lines.append(
+                f"• <b>{item.title}</b> — <code>{item.chat_id}</code>")
     if errors:
         lines.append("\n❌ خطاها:")
         for err in errors:
@@ -1493,9 +1526,9 @@ async def set_file_link_channels_save(message: Message, state: FSMContext) -> No
 
     await message.answer(
         "\n".join(lines),
-        reply_markup=file_link_manage_kb(link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
+        reply_markup=file_link_manage_kb(
+            link_id, file_id=link_item.file_id, is_active=bool(link_item.is_active)),
     )
-
 
 
 @router.message(F.text.regexp(r"^/del\d+$"))
@@ -1562,8 +1595,10 @@ async def file_delete_confirm_callback(call: CallbackQuery) -> None:
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"filedelete_yes:{file_id}"),
-                InlineKeyboardButton(text="❌ لغو", callback_data=f"filedelete_no:{file_id}"),
+                InlineKeyboardButton(text="✅ بله، حذف شود",
+                                     callback_data=f"filedelete_yes:{file_id}"),
+                InlineKeyboardButton(
+                    text="❌ لغو", callback_data=f"filedelete_no:{file_id}"),
             ]
         ]
     )
@@ -1645,10 +1680,6 @@ async def file_edit_save_handler(message: Message, state: FSMContext) -> None:
     await message.answer("✅ عنوان فایل اصلاح شد.", reply_markup=admin_menu())
     if item:
         await send_file_card(message, item)
-
-
-
-
 
 
 def extract_html_text_from_message(message: Message) -> str:
@@ -1837,7 +1868,8 @@ def custom_post_buttons_kb(buttons: list[dict[str, str]]) -> InlineKeyboardMarku
         style = normalize_button_style(btn.get("style"))
         custom_emoji_id = (btn.get("custom_emoji_id") or "").strip() or None
 
-        rows.append([make_url_button(text=text, url=url, style=style, custom_emoji_id=custom_emoji_id)])
+        rows.append([make_url_button(text=text, url=url,
+                    style=style, custom_emoji_id=custom_emoji_id)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1869,7 +1901,8 @@ def parse_post_buttons(raw: str, bot_username: str, suggested_link: str = "") ->
         parts = [p.strip() for p in line.split("|")]
 
         if len(parts) < 2:
-            errors.append(f"خط {idx}: فرمت درست نیست. نمونه: متن دکمه | لینک | سبز")
+            errors.append(
+                f"خط {idx}: فرمت درست نیست. نمونه: متن دکمه | لینک | سبز")
             continue
 
         text = parts[0]
@@ -1905,7 +1938,6 @@ def parse_post_buttons(raw: str, bot_username: str, suggested_link: str = "") ->
     return buttons, errors
 
 
-
 def choose_post_file_kb(items) -> InlineKeyboardMarkup:
     rows = []
     for item in items:
@@ -1913,8 +1945,10 @@ def choose_post_file_kb(items) -> InlineKeyboardMarkup:
         title = str(item.title or "بدون عنوان")
         if len(title) > 32:
             title = title[:29] + "..."
-        rows.append([InlineKeyboardButton(text=f"{status} #{item.id} — {title}", callback_data=f"postfile:{item.id}")])
-    rows.append([InlineKeyboardButton(text="⏭ بدون انتخاب فایل ثبت‌شده", callback_data="postfile:none")])
+        rows.append([InlineKeyboardButton(
+            text=f"{status} #{item.id} — {title}", callback_data=f"postfile:{item.id}")])
+    rows.append([InlineKeyboardButton(
+        text="⏭ بدون انتخاب فایل ثبت‌شده", callback_data="postfile:none")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1940,15 +1974,19 @@ def parse_target_channels(raw: str) -> list[str]:
 
     return channels
 
+
 def post_button_color_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🟢 سبز", callback_data="pbc:success"),
-                InlineKeyboardButton(text="🔴 قرمز", callback_data="pbc:danger"),
+                InlineKeyboardButton(
+                    text="🟢 سبز", callback_data="pbc:success"),
+                InlineKeyboardButton(
+                    text="🔴 قرمز", callback_data="pbc:danger"),
             ],
             [
-                InlineKeyboardButton(text="🔵 آبی", callback_data="pbc:primary"),
+                InlineKeyboardButton(
+                    text="🔵 آبی", callback_data="pbc:primary"),
                 InlineKeyboardButton(text="⚪ معمولی", callback_data="pbc:"),
             ],
         ]
@@ -1958,9 +1996,12 @@ def post_button_color_kb() -> InlineKeyboardMarkup:
 def post_buttons_next_kb(buttons_count: int) -> InlineKeyboardMarkup:
     rows = []
     if buttons_count < 10:
-        rows.append([InlineKeyboardButton(text="➕ افزودن دکمه دیگر", callback_data="pbnext:add")])
-    rows.append([InlineKeyboardButton(text=f"✅ پایان دکمه‌ها ({buttons_count})", callback_data="pbnext:finish")])
-    rows.append([InlineKeyboardButton(text="🧹 پاک کردن همه دکمه‌ها", callback_data="pbnext:clear")])
+        rows.append([InlineKeyboardButton(
+            text="➕ افزودن دکمه دیگر", callback_data="pbnext:add")])
+    rows.append([InlineKeyboardButton(
+        text=f"✅ پایان دکمه‌ها ({buttons_count})", callback_data="pbnext:finish")])
+    rows.append([InlineKeyboardButton(
+        text="🧹 پاک کردن همه دکمه‌ها", callback_data="pbnext:clear")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -2028,7 +2069,6 @@ async def ask_target_channels_after_step_buttons(message: Message, state: FSMCon
         f"{default_text}\n\n"
         "نکته: ربات باید داخل همه این کانال‌ها ادمین باشد و اجازه ارسال پست داشته باشد."
     )
-
 
 
 async def publish_channel_post(
@@ -2368,7 +2408,6 @@ async def create_channel_post_button_next(call: CallbackQuery, state: FSMContext
     await call.answer("گزینه نامعتبر است.", show_alert=True)
 
 
-
 @router.message(CreateChannelPostState.target_channels)
 async def create_channel_post_target_channels(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
@@ -2399,7 +2438,8 @@ async def create_channel_post_target_channels(message: Message, state: FSMContex
             media_has_spoiler=bool(data.get("media_has_spoiler", False)),
         )
 
-        button_text_summary = " | ".join(str(btn.get("text", "")) for btn in buttons)[:240] if buttons else "—"
+        button_text_summary = " | ".join(str(btn.get("text", "")) for btn in buttons)[
+            :240] if buttons else "—"
         button_url_summary = str(buttons[0].get("url", "")) if buttons else ""
 
         for target, msg_id in sent_to:
@@ -2439,13 +2479,14 @@ async def create_channel_post_target_channels(message: Message, state: FSMContex
 
     msg = "✅ ارسال پست تمام شد.\n\n"
     if sent_to:
-        msg += "ارسال موفق به:\n" + "\n".join(f"• <code>{target}</code> — پیام <code>{msg_id}</code>" for target, msg_id in sent_to)
+        msg += "ارسال موفق به:\n" + \
+            "\n".join(
+                f"• <code>{target}</code> — پیام <code>{msg_id}</code>" for target, msg_id in sent_to)
     if failed:
-        msg += "\n\n❌ خطا در این کانال‌ها:\n" + "\n".join(f"• <code>{x}</code>" for x in failed)
+        msg += "\n\n❌ خطا در این کانال‌ها:\n" + \
+            "\n".join(f"• <code>{x}</code>" for x in failed)
 
     await message.answer(msg, reply_markup=admin_menu())
-
-
 
 
 # دستورهای قدیمی روش قبلی؛ دیگر اجرا نمی‌شوند تا ادمین فقط از پنل جدید استفاده کند.
@@ -2524,7 +2565,8 @@ async def channels_handler(message: Message) -> None:
 
 async def _validate_and_save_channel(bot: Bot, chat_id: str, link: str | None, replace_all: bool = False):
     chat = await bot.get_chat(chat_id)
-    title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+    title = getattr(chat, "title", None) or getattr(
+        chat, "username", None) or str(chat_id)
 
     if not link and getattr(chat, "username", None):
         link = f"https://t.me/{chat.username}"
@@ -2761,7 +2803,8 @@ async def section_channels_handler(message: Message) -> None:
 
     channels = await crud.get_section_required_channels(active_only=False)
     lines = ["🧩 <b>کانال‌های عضویت اختصاصی بخش‌ها</b>\n"]
-    lines.append("کلیدهای مجاز: <code>telegram</code>، <code>vpn</code>، <code>accounts</code>\n")
+    lines.append(
+        "کلیدهای مجاز: <code>telegram</code>، <code>vpn</code>، <code>accounts</code>\n")
 
     if channels:
         for ch in channels:
@@ -2798,10 +2841,12 @@ async def section_channels_handler(message: Message) -> None:
 
 async def _validate_and_save_section_channel(bot: Bot, section_key: str, chat_id: str, link: str | None = None):
     if section_key not in SECTION_TITLES:
-        raise ValueError(f"section_key نامعتبر است. مقدارهای مجاز: {SECTION_KEY_HELP}")
+        raise ValueError(
+            f"section_key نامعتبر است. مقدارهای مجاز: {SECTION_KEY_HELP}")
 
     chat = await bot.get_chat(chat_id)
-    title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+    title = getattr(chat, "title", None) or getattr(
+        chat, "username", None) or str(chat_id)
 
     if not link and getattr(chat, "username", None):
         link = f"https://t.me/{chat.username}"
@@ -2853,8 +2898,6 @@ async def add_section_channel_handler(message: Message) -> None:
         f"Chat: <code>{item.chat_id}</code>\n"
         f"Link: <code>{item.link or '-'}</code>"
     )
-
-
 
 
 async def _save_main_required_channel(message: Message, channel_text: str) -> None:
@@ -2979,7 +3022,8 @@ async def _edit_main_required_channel(message: Message, channel_id: int, channel
     link = parts[1].strip() if len(parts) > 1 else None
     try:
         chat = await message.bot.get_chat(chat_id)
-        title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+        title = getattr(chat, "title", None) or getattr(
+            chat, "username", None) or str(chat_id)
         if not link and getattr(chat, "username", None):
             link = f"https://t.me/{chat.username}"
         item = await crud.update_required_channel(channel_id, chat_id=str(chat_id), link=link, title=title)
@@ -3016,7 +3060,8 @@ async def _edit_section_required_channel(message: Message, section_key: str, cha
     link = parts[1].strip() if len(parts) > 1 else None
     try:
         chat = await message.bot.get_chat(chat_id)
-        title = getattr(chat, "title", None) or getattr(chat, "username", None) or str(chat_id)
+        title = getattr(chat, "title", None) or getattr(
+            chat, "username", None) or str(chat_id)
         if not link and getattr(chat, "username", None):
             link = f"https://t.me/{chat.username}"
         item = await crud.update_section_required_channel(channel_id, chat_id=str(chat_id), link=link, title=title)
@@ -3171,8 +3216,6 @@ async def debug_channel_handler(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
-
-
 def get_sqlite_db_path() -> str:
     """Extract SQLite database file path from DATABASE_URL."""
     raw = str(DATABASE_URL or "").strip()
@@ -3215,7 +3258,8 @@ async def send_database_backup(bot: Bot, reason: str = "manual") -> None:
                 caption=caption,
             )
         except Exception as e:
-            logging.warning("auto/manual backup failed for admin %s: %s", admin_id, e)
+            logging.warning(
+                "auto/manual backup failed for admin %s: %s", admin_id, e)
 
 
 async def auto_backup_loop(bot: Bot) -> None:
@@ -3237,7 +3281,6 @@ async def auto_backup_loop(bot: Bot) -> None:
         await send_database_backup(bot, reason=f"auto-every-{hours}h")
 
 
-
 # ============================================================
 # ارسال همگانی به کاربران ربات
 # ============================================================
@@ -3245,8 +3288,10 @@ async def auto_backup_loop(bot: Bot) -> None:
 def broadcast_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ ارسال به همه کاربران فعال", callback_data="broadcast:send")],
-            [InlineKeyboardButton(text="❌ لغو ارسال همگانی", callback_data="broadcast:cancel")],
+            [InlineKeyboardButton(
+                text="✅ ارسال به همه کاربران فعال", callback_data="broadcast:send")],
+            [InlineKeyboardButton(text="❌ لغو ارسال همگانی",
+                                  callback_data="broadcast:cancel")],
         ]
     )
 
@@ -3340,11 +3385,12 @@ async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> Non
 
     users = await crud.get_users()
     targets = [u.telegram_id for u in users if u.telegram_id not in ADMIN_IDS]
+    total = len(targets)
 
-    await call.message.answer(
+    progress_msg = await call.message.answer(
         "⏳ ارسال همگانی شروع شد...\n\n"
-        f"تعداد کاربران هدف: <code>{len(targets)}</code>\n"
-        "تا پایان ارسال صبر کن."
+        f"تعداد کاربران هدف: <code>{total}</code>\n"
+        "وضعیت ارسال هر چند لحظه آپدیت می‌شود."
     )
     await call.answer()
 
@@ -3352,13 +3398,38 @@ async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> Non
     reply_markup_data = data.get("reply_markup_data")
     if reply_markup_data:
         try:
-            reply_markup = InlineKeyboardMarkup.model_validate(reply_markup_data)
+            reply_markup = InlineKeyboardMarkup.model_validate(
+                reply_markup_data)
         except Exception:
             reply_markup = None
 
     sent = 0
     failed = 0
     blocked = 0
+    processed = 0
+    start_ts = asyncio.get_running_loop().time()
+
+    async def update_progress(force: bool = False) -> None:
+        if not force and processed % 250 != 0:
+            return
+
+        elapsed = max(1, int(asyncio.get_running_loop().time() - start_ts))
+        speed = processed / elapsed if elapsed else 0
+        remaining = max(0, total - processed)
+        eta = int(remaining / speed) if speed else 0
+
+        try:
+            await progress_msg.edit_text(
+                "⏳ ارسال همگانی در حال انجام است...\n\n"
+                f"پیشرفت: <code>{processed}</code> / <code>{total}</code>\n"
+                f"موفق: <code>{sent}</code>\n"
+                f"ناموفق: <code>{failed}</code>\n"
+                f"بلاک/دسترسی نیست: <code>{blocked}</code>\n"
+                f"زمان گذشته: <code>{elapsed}</code> ثانیه\n"
+                f"زمان تقریبی باقی‌مانده: <code>{eta}</code> ثانیه"
+            )
+        except Exception:
+            pass
 
     for user_id in targets:
         try:
@@ -3369,22 +3440,46 @@ async def broadcast_send_callback(call: CallbackQuery, state: FSMContext) -> Non
                 reply_markup=reply_markup,
             )
             sent += 1
+        except TelegramRetryAfter as e:
+            # اگر تلگرام محدودیت داد، همان مقدار گفته‌شده صبر می‌کنیم و دوباره یک بار تلاش می‌کنیم.
+            retry_after = int(getattr(e, "retry_after", 1) or 1)
+            await asyncio.sleep(retry_after + 1)
+            try:
+                await call.bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id,
+                    reply_markup=reply_markup,
+                )
+                sent += 1
+            except TelegramForbiddenError:
+                blocked += 1
+                failed += 1
+            except Exception:
+                failed += 1
         except TelegramForbiddenError:
             blocked += 1
             failed += 1
         except Exception:
             failed += 1
 
-        # رعایت محدودیت ارسال تلگرام و جلوگیری از فشار زیاد
-        await asyncio.sleep(0.05)
+        processed += 1
+        await update_progress()
+
+        # رعایت محدودیت ارسال تلگرام؛ برای ۵۰۰۰ کاربر معمولاً چند دقیقه طول می‌کشد.
+        await asyncio.sleep(0.04)
 
     await state.clear()
+    await update_progress(force=True)
 
+    elapsed = max(1, int(asyncio.get_running_loop().time() - start_ts))
     await call.message.answer(
         "✅ ارسال همگانی تمام شد.\n\n"
+        f"کل کاربران هدف: <code>{total}</code>\n"
         f"موفق: <code>{sent}</code>\n"
         f"ناموفق: <code>{failed}</code>\n"
-        f"بلاک کرده‌اند/دسترسی نیست: <code>{blocked}</code>",
+        f"بلاک کرده‌اند/دسترسی نیست: <code>{blocked}</code>\n"
+        f"زمان کل: <code>{elapsed}</code> ثانیه",
         reply_markup=admin_menu(),
     )
 
@@ -3396,7 +3491,6 @@ async def backup_handler(message: Message) -> None:
         return
     await message.answer("⏳ در حال آماده‌سازی بکاپ دیتابیس...")
     await send_database_backup(message.bot, reason="manual")
-
 
 
 @router.message()
@@ -3449,8 +3543,10 @@ async def main() -> None:
         BotCommand(command="help", description="راهنمای ادمین"),
         BotCommand(command="add", description="ثبت فایل جدید"),
         BotCommand(command="files", description="لیست فایل‌ها"),
-        BotCommand(command="stats", description="آمار ربات"),        BotCommand(command="channels", description="مدیریت کانال‌های اجباری"),
-        BotCommand(command="addchannel", description="باز کردن منوی مدیریت کانال اجباری"),
+        BotCommand(command="stats", description="آمار ربات"),        BotCommand(
+            command="channels", description="مدیریت کانال‌های اجباری"),
+        BotCommand(command="addchannel",
+                   description="باز کردن منوی مدیریت کانال اجباری"),
         BotCommand(command="cancel", description="لغو عملیات فعلی"),
         BotCommand(command="version", description="نمایش نسخه فعال"),
         BotCommand(command="backup", description="دریافت بکاپ دیتابیس"),
@@ -3468,7 +3564,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    print("Bot started — movie-bot-v9.3-broadcast-buttons-fix")
+    print("Bot started — movie-bot-v9.4-broadcast-progress")
     asyncio.create_task(auto_backup_loop(bot))
     await dp.start_polling(bot)
 
