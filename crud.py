@@ -103,6 +103,15 @@ async def count_users() -> int:
         return int(result.scalar() or 0)
 
 
+async def get_users(limit: int | None = None) -> list[User]:
+    async with SessionLocal() as session:
+        stmt = select(User).order_by(User.id.asc())
+        if limit is not None:
+            stmt = stmt.limit(int(limit))
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
 async def count_files() -> int:
     async with SessionLocal() as session:
         result = await session.execute(select(func.count(FileItem.id)))
